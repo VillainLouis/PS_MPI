@@ -1,21 +1,10 @@
 from fileinput import filename
-import imp
 import os
-import sys
 import argparse
-import socket
-import pickle
 import asyncio
-import concurrent.futures
-import json
-import random
 import time
-from tkinter.tix import Tree
 import numpy as np
-import threading
 import torch
-import copy
-import math
 from config import *
 import torch.nn.functional as F
 import datasets, models
@@ -38,7 +27,7 @@ parser.add_argument('--min_lr', type=float, default=0.001)
 parser.add_argument('--epoch', type=int, default=500)
 parser.add_argument('--momentum', type=float, default=-1)
 parser.add_argument('--weight_decay', type=float, default=0.0)
-parser.add_argument('--data_path', type=str, default='/data/docker/data')
+parser.add_argument('--data_path', type=str, default='/data/jliu/data')
 parser.add_argument('--use_cuda', action="store_false", default=True)
 
 args = parser.parse_args()

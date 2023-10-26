@@ -1,10 +1,4 @@
-import os
-import sys
-import struct
-import socket
 import pickle
-from time import sleep
-import time
 
 async def send_data(comm, data, client_rank, tag_epoch):
     data = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)  
