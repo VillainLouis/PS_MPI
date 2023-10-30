@@ -7,7 +7,8 @@ import numpy as np
 import torch
 from config import *
 import torch.nn.functional as F
-import datasets, models
+import mydatasets
+import models
 from training_utils import test
 
 from mpi4py import MPI
@@ -102,8 +103,8 @@ def main():
 
     # recoder: SummaryWriter = SummaryWriter()
     global_model.to(device)
-    _, test_dataset = datasets.load_datasets(common_config.dataset_type,common_config.data_path)
-    test_loader = datasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False)
+    _, test_dataset = mydatasets.load_datasets(common_config.dataset_type,common_config.data_path)
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False)
 
 
     for epoch_idx in range(1, 1+common_config.epoch):
@@ -155,7 +156,7 @@ def non_iid_partition(ratio, train_class_num, worker_num):
     return partition_sizes
 
 def partition_data(dataset_type, data_pattern, worker_num=10):
-    train_dataset, _ = datasets.load_datasets(dataset_type=dataset_type,data_path=args.data_path)
+    train_dataset, _ = mydatasets.load_datasets(dataset_type=dataset_type,data_path=args.data_path)
 
     if dataset_type == "CIFAR10" or dataset_type == "FashionMNIST":
         train_class_num=10
@@ -205,7 +206,7 @@ def partition_data(dataset_type, data_pattern, worker_num=10):
         elif data_pattern == 4:
             non_iid_ratio = 0.8
             partition_sizes = non_iid_partition(non_iid_ratio,train_class_num,worker_num)
-    train_data_partition = datasets.LabelwisePartitioner(train_dataset, partition_sizes=partition_sizes)
+    train_data_partition = mydatasets.LabelwisePartitioner(train_dataset, partition_sizes=partition_sizes)
     return train_data_partition
 
 if __name__ == "__main__":

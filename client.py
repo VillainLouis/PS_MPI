@@ -8,7 +8,7 @@ import torch.optim as optim
 from config import ClientConfig, CommonConfig
 from comm_utils import *
 from training_utils import train, test
-import datasets, models
+import mydatasets, models
 from mpi4py import MPI
 import logging
 
@@ -90,9 +90,9 @@ def main():
     logger.info(str(common_config.__dict__))
 
     logger.info(str(len(client_config.train_data_idxes)))
-    train_dataset, test_dataset = datasets.load_datasets(common_config.dataset_type, common_config.data_path)
-    train_loader = datasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes)
-    test_loader = datasets.create_dataloaders(test_dataset, batch_size=16, shuffle=False)
+    train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type, common_config.data_path)
+    train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes)
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=16, shuffle=False)
 
     while True:
         loop = asyncio.new_event_loop()
