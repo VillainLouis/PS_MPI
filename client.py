@@ -8,7 +8,7 @@ import torch.optim as optim
 from config import ClientConfig, CommonConfig
 from comm_utils import *
 from training_utils import train, test
-import mydatasets, models
+import mydatasets, mymodels
 from mpi4py import MPI
 import logging
 
@@ -111,7 +111,7 @@ def main():
 
 
 async def local_training(comm, common_config, train_loader, test_loader):
-    local_model = models.create_model_instance(common_config.dataset_type, common_config.model_type)
+    local_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
     torch.nn.utils.vector_to_parameters(common_config.para, local_model.parameters())
     local_model.to(device)
     epoch_lr = common_config.lr

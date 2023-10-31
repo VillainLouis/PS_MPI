@@ -8,7 +8,7 @@ import torch
 from config import *
 import torch.nn.functional as F
 import mydatasets
-import models
+import mymodels
 from training_utils import test
 
 from mpi4py import MPI
@@ -76,7 +76,7 @@ def main():
 
     worker_num = int(csize)-1
 
-    global_model = models.create_model_instance(common_config.dataset_type, common_config.model_type)
+    global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
     init_para = torch.nn.utils.parameters_to_vector(global_model.parameters())
     common_config.para_nums=init_para.nelement()
     model_size = init_para.nelement() * 4 / 1024 / 1024
@@ -84,7 +84,7 @@ def main():
     logger.info("Model Size: {} MB".format(model_size))
 
     # create workers
-    worker_list: List[Worker] = list()
+    worker_list: list[Worker] = list()
     for worker_idx in range(worker_num):
         worker_list.append(
             Worker(config=ClientConfig(common_config=common_config),rank=worker_idx+1)
