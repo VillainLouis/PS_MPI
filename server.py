@@ -32,8 +32,9 @@ parser.add_argument('--data_path', type=str, default='/data/jliu/data')
 parser.add_argument('--use_cuda', action="store_false", default=True)
 
 args = parser.parse_args()
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+print(torch.cuda.device_count())
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
 

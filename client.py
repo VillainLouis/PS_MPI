@@ -12,6 +12,18 @@ import mydatasets, mymodels
 from mpi4py import MPI
 import logging
 
+from mymodels import BertForQA
+from train_eval.train_eval import train_and_eval
+from mydatasets import SQuAD_V2_Dataset
+import timeit
+from transformers.data.metrics.squad_metrics import compute_predictions_logits, compute_predictions_log_probs, squad_evaluate
+from transformers.data.processors.squad import SquadResult,SquadFeatures,SquadExample
+from train_eval.evaluate_official2 import eval_squad
+import random
+from config import BertForMRCConfig
+from transformers import BertTokenizer, AutoTokenizer
+
+
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
 parser.add_argument('--use_cuda', action="store_false", default=True)
@@ -22,11 +34,11 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 csize = comm.Get_size()
 
-if args.visible_cuda == '-1':
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(int(rank)% 4 + 0)
-else:
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.visible_cuda
-device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
+# if args.visible_cuda == '-1':
+#     os.environ['CUDA_VISIBLE_DEVICES'] = str(int(rank)% 4 + 0)
+# else:
+#     os.environ['CUDA_VISIBLE_DEVICES'] = args.visible_cuda
+# device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
 
 # init logger
@@ -55,6 +67,14 @@ async def get_init_config(comm, MASTER_RANK, config):
     logger.info("after init")
     for k, v in config_received.__dict__.items():
         setattr(config, k, v)
+
+def set_seed(config):
+    seed = config.seed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if config.n_gpu > 0:
+        torch.cuda.manual_seed_all(seed)
 
 def main():
     logger.info("client_rank:{}".format(rank))
@@ -87,25 +107,56 @@ def main():
     
     common_config.tag = 1
     # init config
-    logger.info(str(common_config.__dict__))
+    config = BertForMRCConfig()
+    
+    config.model_dir = "/data/jliu/models"
+    config.train_path = "/data/jliu/data/SQuAD"
+    config.dev_path = "/data/jliu/data/SQuAD"
+    config.device = f"cuda:{rank % 8}"
+    set_seed(config)
+    tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
+    model = BertForQA(config)
+    model.to(config.device)
+    
+    train_Dataset = SQuAD_V2_Dataset(tokenizer=tokenizer,data_dir=config.train_path,filename=config.train_file,is_training=True,config=config,cached_features_file=os.path.join(config.train_path,"cache_" + config.train_file.replace("json","data")))
+    train_features,train_dataset = train_Dataset.features,train_Dataset.dataset
 
-    logger.info(str(len(client_config.train_data_idxes)))
-    train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type, common_config.data_path)
-    train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes)
-    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=16, shuffle=False)
+    train_loader = mydatasets.create_dataloaders(dataset=train_dataset, batch_size=config.batch_size)
+    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+
+    
+    # Train!
+    logger.info("***** Running training *****")
+    logger.info("  Num examples = %d", len(train_dataset))
+    logger.info("  Num Epochs = %d", config.nums_epochs)
+    logger.info("  Instantaneous batch size per GPU = %d", config.batch_size)
+    # logger.info("  Total train batch size (w. parallel, distributed & accumulation) = %d",
+    #                args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
+    # logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
+    # logger.info("  Total optimization steps = %d", t_total)
+    
 
     while True:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        tasks = []
-        tasks.append(
-            asyncio.ensure_future(
-                local_training(comm, common_config, train_loader, test_loader)
-            )
-        )
-        loop.run_until_complete(asyncio.wait(tasks))
+        # 开始本地训练
+        logger.info(f"##################### Round {common_config.tag} start ... #########################")
+        # loop = asyncio.new_event_loop()
+        # asyncio.set_event_loop(loop)
+        # tasks = []
+        # tasks.append(
+        #     asyncio.ensure_future(
+        #         train_and_eval(config,model,train_loader,tokenizer, rank, logger)
+        #     )
+        # )
+        # loop.run_until_complete(asyncio.wait(tasks))
 
-        loop.close()
+        # loop.close()
+        train_and_eval(config,model,train_loader,tokenizer, rank, logger)
+        
+        # 本地训练结束，上传lora参数
+        
+        # 等待从server接收lora参数，用来更新模型
+        
+        common_config.tag += 1
         if common_config.tag==common_config.epoch+1:
             break
 

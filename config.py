@@ -1,5 +1,6 @@
 from comm_utils import *
-
+import torch
+from transformers import BertTokenizer
 
 class ClientAction:
     LOCAL_TRAINING = "local_training"
@@ -41,6 +42,8 @@ class CommonConfig:
         self.para = None
         self.data_path = None
         #这里用来存worker的
+        self.bert_mrc_config = BertForMRCConfig()
+        self.lora_layers = []
 
 
 class ClientConfig:
@@ -59,3 +62,51 @@ class ClientConfig:
         self.send_time=0
         self.neighbor_paras=None
         self.neighbor_indices=None
+
+
+class BertForMRCConfig(object):
+    def __init__(self):
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.n_gpu = torch.cuda.device_count()
+        self.seed = 18
+
+        self.model_name = "bert-base-uncased"
+        self.max_seq_length = 512
+        self.doc_stride = 128
+        self.max_query_length = 64
+        self.Tokenizer = BertTokenizer
+        self.num_type = 2
+
+        self.train_path = "data/train"
+        self.train_file = "train-v2.0.json"
+        self.dev_path = "data/dev"
+        self.dev_file = "dev-v2.0.json"
+        self.check_point_path = "" # 是否继续训练
+
+        self.model_dir = "/data/jliu/models/"
+        self.logging_path = "all.log"
+        self.output_dir = "output/"
+        self.data_output_dir = ""
+
+
+        self.batch_size = 10
+        self.learning_rate = 1e-4
+        # self.optimizer = 'Adam'
+        self.adam_epsilon = 1e-8
+        self.nums_epochs = 1
+        self.max_steps = 1000 # 1000000000
+        self.save_steps = 10000
+        self.gradient_accumulation_steps = 50
+        self.logging_steps = 100
+        self.warmup_steps = 0
+
+
+        self.hidden_size = 768
+        self.num_class = 10
+
+        self.n_best_size = 20 # "The total number of n-best predictions to generate in the nbest_predictions.json output file."
+        self.max_answer_length = 30 # "The maximum length of an answer that can be generated. This is needed because the start and end predictions are not conditioned on one another."
+        self.do_lower_case = True
+        self.verbose_logging = True
+        self.version_2_with_negative = True
+        self.null_score_diff_threshold = 0.0 # "If null_score - best_non_null is greater than the threshold predict null."
