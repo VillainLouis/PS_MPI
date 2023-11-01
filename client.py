@@ -22,7 +22,7 @@ from train_eval.evaluate_official2 import eval_squad
 import random
 from config import BertForMRCConfig
 from transformers import BertTokenizer, AutoTokenizer
-
+from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
 
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
@@ -116,7 +116,25 @@ def main():
     set_seed(config)
     tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
     model = BertForQA(config)
+    target_modules = ["query", "key", "value"]
+
+    lora_config = LoraConfig(
+        r = 16,
+        lora_alpha = 32,
+        target_modules=target_modules,
+        lora_dropout = 0.05,
+        bias = "none",
+        task_type = "QA",
+    )
+
+    model = prepare_model_for_int8_training(model)
+
+    model = get_peft_model(model, lora_config)
+    
     model.to(config.device)
+    
+    logger.info(f"The size of trainable parameters of the peft model is {model.get_nb_trainable_parameters()}")
+    logger.info(f"The model architecture --> {model}")
     
     train_Dataset = SQuAD_V2_Dataset(tokenizer=tokenizer,data_dir=config.train_path,filename=config.train_file,is_training=True,config=config,cached_features_file=os.path.join(config.train_path,"cache_" + config.train_file.replace("json","data")))
     train_features,train_dataset = train_Dataset.features,train_Dataset.dataset
