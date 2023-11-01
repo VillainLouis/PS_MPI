@@ -106,13 +106,11 @@ class DataLoaderHelper(object):
 
 class RandomPartitioner(object):
 
-    def __init__(self, data, partition_sizes, seed=2020):
-        self.data = data
+    def __init__(self, data_len, partition_sizes, seed=2020):
         self.partitions = []
         rng = random.Random()
         rng.seed(seed)
 
-        data_len = len(data)
         indexes = [x for x in range(0, data_len)]
         rng.shuffle(indexes)
 

@@ -14,7 +14,7 @@ from training_utils import test
 from mpi4py import MPI
 
 import logging
-
+import random
 
 #init parameters
 parser = argparse.ArgumentParser(description='Distributed Client')
@@ -58,6 +58,14 @@ formatter = logging.Formatter("%(message)s")
 fileHandler.setFormatter(formatter)
 logger.addHandler(fileHandler)
 
+def set_seed(config):
+    seed = config.seed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if config.n_gpu > 0:
+        torch.cuda.manual_seed_all(seed)
+
 def main():
     logger.info("csize:{}".format(int(csize)))
     logger.info("server start (rank):{}".format(int(rank)))
@@ -77,7 +85,18 @@ def main():
 
     worker_num = int(csize)-1
 
-    global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
+    from mymodels import BertForQA
+    config = BertForMRCConfig()
+    
+    config.model_dir = "/data/jliu/models"
+    config.train_path = "/data/jliu/data/SQuAD"
+    config.dev_path = "/data/jliu/data/SQuAD"
+    config.device = f"cuda:{rank % 8}"
+    set_seed(config)
+    tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
+    global_model = BertForQA(config)
+    
+    # global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
     init_para = torch.nn.utils.parameters_to_vector(global_model.parameters())
     common_config.para_nums=init_para.nelement()
     model_size = init_para.nelement() * 4 / 1024 / 1024
@@ -93,12 +112,16 @@ def main():
     #到了这里，worker已经启动了
 
     # Create model instance
-    train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
+    from mydatasets import RandomPartitioner
+    dataset_size = 130571 # SQuAD v2
+    train_data_partition = RandomPartitioner(data_len=dataset_size, partition_sizes=[1/worker_num for _ in range(worker_num)])
+    
+    # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
     for worker_idx, worker in enumerate(worker_list):
         worker.config.para = init_para
         worker.config.train_data_idxes = train_data_partition.use(worker_idx)
-
+        # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     # connect socket and send init config
     communication_parallel(worker_list, 1, comm, action="init")
 

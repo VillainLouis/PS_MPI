@@ -121,14 +121,15 @@ def main():
     train_Dataset = SQuAD_V2_Dataset(tokenizer=tokenizer,data_dir=config.train_path,filename=config.train_file,is_training=True,config=config,cached_features_file=os.path.join(config.train_path,"cache_" + config.train_file.replace("json","data")))
     train_features,train_dataset = train_Dataset.features,train_Dataset.dataset
 
-    train_loader = mydatasets.create_dataloaders(dataset=train_dataset, batch_size=config.batch_size)
+    # logger.info(f"$$$$$$$$ client_config.train_data_idxes = {client_config.train_data_idxes}")
+    train_loader = mydatasets.create_dataloaders(dataset=train_dataset, batch_size=config.batch_size, selected_idxs=client_config.train_data_idxes)
     # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
 
     
     # Train!
     logger.info("***** Running training *****")
-    logger.info("  Num examples = %d", len(train_dataset))
-    logger.info("  Num Epochs = %d", config.nums_epochs)
+    logger.info("  Num examples = %d", len(client_config.train_data_idxes))
+    logger.info("  Num local steps = %d", config.max_steps)
     logger.info("  Instantaneous batch size per GPU = %d", config.batch_size)
     # logger.info("  Total train batch size (w. parallel, distributed & accumulation) = %d",
     #                args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
