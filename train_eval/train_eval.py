@@ -23,7 +23,7 @@ def train_and_eval(config,model,train_loader,tokenizer, rank, logger):
     best_f1 = -1
     tr_loss, logging_loss = 0.0, 0.0
     # t_total = len(train_loader) // config.gradient_accumulation_steps * config.nums_epochs
-    t_total = config.max_steps
+    t_total = config.max_steps * config.batch_size // config.gradient_accumulation_steps
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, eps=config.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=config.warmup_steps, num_training_steps=t_total)

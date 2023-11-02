@@ -62,9 +62,7 @@ logger.addHandler(fileHandler)
 MASTER_RANK=0
 
 async def get_init_config(comm, MASTER_RANK, config):
-    logger.info("before init")
     config_received = await get_data(comm, MASTER_RANK, 1)
-    logger.info("after init")
     for k, v in config_received.__dict__.items():
         setattr(config, k, v)
 
@@ -81,16 +79,19 @@ def main():
     client_config = ClientConfig(
         common_config=CommonConfig()
     )
-
-    logger.info("start")
+    
+    logger.info("Receiving init config from the server...")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     tasks = []
-    task = asyncio.ensure_future(get_init_config(comm,MASTER_RANK,client_config))
+    task = asyncio.ensure_future(
+        get_init_config(comm,MASTER_RANK,client_config)
+        )
     tasks.append(task)
     loop.run_until_complete(asyncio.wait(tasks))
     loop.close()
-
+    logger.info("Acknowledged.")
+    
     common_config = CommonConfig()
     common_config.model_type = client_config.common_config.model_type
     common_config.dataset_type = client_config.common_config.dataset_type
@@ -114,10 +115,12 @@ def main():
     config.dev_path = "/data/jliu/data/SQuAD"
     config.device = f"cuda:{rank % 8}"
     set_seed(config)
+    logger.info(f"Loading pretrained model from {os.path.join(config.model_dir,config.model_name)}...")
     tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
     model = BertForQA(config)
     target_modules = ["query", "key", "value"]
-
+    logger.info("Finished.")
+    
     lora_config = LoraConfig(
         r = 16,
         lora_alpha = 32,
@@ -126,7 +129,9 @@ def main():
         bias = "none",
         task_type = "QA",
     )
-
+    logger.info(f"lora config --> {lora_config}")
+    
+    
     model = prepare_model_for_int8_training(model)
 
     model = get_peft_model(model, lora_config)
@@ -136,12 +141,12 @@ def main():
     logger.info(f"The size of trainable parameters of the peft model is {model.get_nb_trainable_parameters()}")
     logger.info(f"The model architecture --> {model}")
     
+    logger.info(f"Loading dataset from {os.path.join(config.train_path, config.train_file)}")
     train_Dataset = SQuAD_V2_Dataset(tokenizer=tokenizer,data_dir=config.train_path,filename=config.train_file,is_training=True,config=config,cached_features_file=os.path.join(config.train_path,"cache_" + config.train_file.replace("json","data")))
     train_features,train_dataset = train_Dataset.features,train_Dataset.dataset
+    logger.info("Finished.")
 
-    # logger.info(f"$$$$$$$$ client_config.train_data_idxes = {client_config.train_data_idxes}")
     train_loader = mydatasets.create_dataloaders(dataset=train_dataset, batch_size=config.batch_size, selected_idxs=client_config.train_data_idxes)
-    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
 
     
     # Train!
@@ -149,35 +154,45 @@ def main():
     logger.info("  Num examples = %d", len(client_config.train_data_idxes))
     logger.info("  Num local steps = %d", config.max_steps)
     logger.info("  Instantaneous batch size per GPU = %d", config.batch_size)
-    # logger.info("  Total train batch size (w. parallel, distributed & accumulation) = %d",
-    #                args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
-    # logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
-    # logger.info("  Total optimization steps = %d", t_total)
     
 
     while True:
         # 开始本地训练
         logger.info(f"##################### Round {common_config.tag} start ... #########################")
-        # loop = asyncio.new_event_loop()
-        # asyncio.set_event_loop(loop)
-        # tasks = []
-        # tasks.append(
-        #     asyncio.ensure_future(
-        #         train_and_eval(config,model,train_loader,tokenizer, rank, logger)
-        #     )
-        # )
-        # loop.run_until_complete(asyncio.wait(tasks))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        tasks = []
+        tasks.append(
+            asyncio.ensure_future(
+                # train_and_eval(config,model,train_loader,tokenizer, rank, logger)
+                local_procedure(comm, common_config, config, model, train_loader, tokenizer, rank, logger)
+            )
+        )
+        loop.run_until_complete(asyncio.wait(tasks))
 
-        # loop.close()
-        train_and_eval(config,model,train_loader,tokenizer, rank, logger)
-        
-        # 本地训练结束，上传lora参数
-        
-        # 等待从server接收lora参数，用来更新模型
-        
+        loop.close()
+  
         common_config.tag += 1
         if common_config.tag==common_config.epoch+1:
             break
+
+async def local_procedure(comm, common_config, config:BertForMRCConfig, model:PeftModel, train_loader, tokenizer, rank, logger):
+    train_and_eval(config,model,train_loader,tokenizer, rank, logger)
+    import time
+    time.sleep(10)
+    # 本地训练结束，上传lora参数
+    logger.info("Sending local parameters to the server")
+    local_paras = dict()
+    for layer, paras in model.named_parameters():
+        if "lora" in layer:
+            local_paras[layer] = paras.clone().detach().to("cpu") # 都移动到cpu上方便聚合
+    await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=common_config.tag)
+    logger.info("Waiting and Receiving aggregated paras from the server...")
+    received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=common_config.tag)
+    logger.info("Updating local model with the received paras...")
+    model_state_dict = model.state_dict()
+    for layer, paras in received_paras.items():
+        model_state_dict[layer] = paras.to(config.device)
 
 
 async def local_training(comm, common_config, train_loader, test_loader):

@@ -32,9 +32,6 @@ parser.add_argument('--data_path', type=str, default='/data/jliu/data')
 parser.add_argument('--use_cuda', action="store_false", default=True)
 
 args = parser.parse_args()
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
-print(torch.cuda.device_count())
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
 
@@ -122,27 +119,37 @@ def main():
         worker.config.para = init_para
         worker.config.train_data_idxes = train_data_partition.use(worker_idx)
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
+    
     # connect socket and send init config
+    logger.info(f"Sending init config to all clients and start the training procedure")
     communication_parallel(worker_list, 1, comm, action="init")
 
-    # recoder: SummaryWriter = SummaryWriter()
-    global_model.to(device)
-    _, test_dataset = mydatasets.load_datasets(common_config.dataset_type,common_config.data_path)
-    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=128, shuffle=False)
-
-
     for epoch_idx in range(1, 1+common_config.epoch):
-        logger.info("get begin")
+        logger.info(f"################## Round {epoch_idx} begin #####################")
+        logger.info("Waiting and receiving updated paras from clients")
         communication_parallel(worker_list, epoch_idx, comm, action="get_para")
-        logger.info("get end")
-        global_para = aggregate_model_para(global_model,worker_list)
-        logger.info("send begin")
+        logger.info("Clients' information received.")
+        logger.info("Performing aggregation...")
+        global_para = aggregate_lora_para(worker_list)
+        logger.info("Aggregation finished and sending the newly aggregated paras back to clients")
         communication_parallel(worker_list, epoch_idx, comm, action="send_model",data=global_para)
-        logger.info("send end")
-        test_loss, acc = test(global_model, test_loader, device, model_type=args.model_type)
-        logger.info("Epoch: {}, accuracy: {}, test_loss: {}\n".format(epoch_idx, acc, test_loss))
+        logger.info(f"Round {epoch_idx} finished")
+        # test_loss, acc = test(global_model, test_loader, device, model_type=args.model_type)
+        # logger.info("Epoch: {}, accuracy: {}, test_loss: {}\n".format(epoch_idx, acc, test_loss))
      
     # close socket
+    
+def aggregate_lora_para(worker_list):
+    with torch.no_grad():
+        aggregated_paras = worker_list[0].config.neighbor_paras
+        for layer in aggregated_paras.keys():
+            for worker in range(1, len(worker_list)):
+                aggregated_paras[layer] += worker_list[worker].config.neighbor_paras[layer]
+            aggregated_paras[layer] /= len(worker_list)
+    return aggregated_paras
+        
+    
+
 def aggregate_model_para(global_model, worker_list):
     global_para = torch.nn.utils.parameters_to_vector(global_model.parameters()).detach()
     with torch.no_grad():
