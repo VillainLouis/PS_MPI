@@ -89,14 +89,14 @@ class BertForMRCConfig(object):
         self.data_output_dir = ""
 
 
-        self.batch_size = 10
+        self.batch_size = 8
         self.learning_rate = 1e-4
         # self.optimizer = 'Adam'
         self.adam_epsilon = 1e-8
         self.nums_epochs = 1
         self.max_steps = 1000 # 1000000000
         self.save_steps = 10000
-        self.gradient_accumulation_steps = 50
+        self.gradient_accumulation_steps = 10
         self.logging_steps = 100
         self.warmup_steps = 0
 

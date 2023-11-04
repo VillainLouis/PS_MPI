@@ -12,6 +12,7 @@ import mydatasets, mymodels
 from mpi4py import MPI
 import logging
 
+# TODO fix BertForQA model
 from mymodels import BertForQA
 from train_eval.train_eval import train_and_eval
 from mydatasets import SQuAD_V2_Dataset
@@ -113,33 +114,66 @@ def main():
     config.model_dir = "/data/jliu/models"
     config.train_path = "/data/jliu/data/SQuAD"
     config.dev_path = "/data/jliu/data/SQuAD"
-    config.device = f"cuda:{rank % 8}"
+    config.device = f"cuda:{rank % torch.cuda.device_count()}"
     set_seed(config)
     logger.info(f"Loading pretrained model from {os.path.join(config.model_dir,config.model_name)}...")
     tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
     model = BertForQA(config)
-    target_modules = ["query", "key", "value"]
-    logger.info("Finished.")
     
-    lora_config = LoraConfig(
-        r = 16,
-        lora_alpha = 32,
-        target_modules=target_modules,
-        lora_dropout = 0.05,
-        bias = "none",
-        task_type = "QA",
-    )
-    logger.info(f"lora config --> {lora_config}")
-    
-    
-    model = prepare_model_for_int8_training(model)
+    ft_type = "FT"
+    if ft_type == "FT":
+        pass
+    elif ft_type == "FLoRA_QKV":
+        target_modules = ["query", "key", "value"]
+        logger.info("Finished.")
+        
+        lora_config = LoraConfig(
+            r = 8,
+            lora_alpha = 32,
+            target_modules=target_modules,
+            lora_dropout = 0.05,
+            bias = "none",
+            task_type = "QA",
+        )
+        logger.info(f"lora config --> {lora_config}")
+        
+        
+        # model = prepare_model_for_int8_training(model)
 
-    model = get_peft_model(model, lora_config)
+        model = get_peft_model(model, lora_config)
+    elif ft_type == "PLoRA_QKV":
+        import loralib as lora
+        target_attn_matrix = { # attn
+            "9": ["query", "key", "value"],
+            "10": ["query", "key", "value"],
+            "11": ["query", "key", "value"]
+        }
+        target_ffn_matrix = { # ffn
+            "11": ["intermediate", "output"]
+        }
+        for layer in target_attn_matrix.keys():
+            for matrix in target_attn_matrix[layer]:
+                module = model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=8, lora_alpha=32)
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+            for layer in target_ffn_matrix.keys():
+                for matrix in target_ffn_matrix[layer]:
+                    module = model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=8, lora_alpha=32)
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+            lora.mark_only_lora_as_trainable(model)
     
     model.to(config.device)
     
-    logger.info(f"The size of trainable parameters of the peft model is {model.get_nb_trainable_parameters()}")
-    logger.info(f"The model architecture --> {model}")
+    logger.info(f"Fine-Tuning type = {ft_type}")
+    # logger.info(f"The size of trainable parameters of the peft model is {model.get_nb_trainable_parameters()}")
+    logger.info(f"The model architecture --> ")
+    for layer, para in model.named_parameters():
+        logger.info(layer)
     
     logger.info(f"Loading dataset from {os.path.join(config.train_path, config.train_file)}")
     train_Dataset = SQuAD_V2_Dataset(tokenizer=tokenizer,data_dir=config.train_path,filename=config.train_file,is_training=True,config=config,cached_features_file=os.path.join(config.train_path,"cache_" + config.train_file.replace("json","data")))
