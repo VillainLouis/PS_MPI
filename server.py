@@ -25,7 +25,7 @@ parser.add_argument('--data_pattern', type=int, default=0)
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--decay_rate', type=float, default=0.99)
 parser.add_argument('--min_lr', type=float, default=0.001)
-parser.add_argument('--epoch', type=int, default=12)
+parser.add_argument('--epoch', type=int, default=20)
 parser.add_argument('--momentum', type=float, default=-1)
 parser.add_argument('--weight_decay', type=float, default=0.0)
 parser.add_argument('--data_path', type=str, default='/data/jliu/data')
@@ -130,7 +130,7 @@ def main():
         communication_parallel(worker_list, epoch_idx, comm, action="get_para")
         logger.info("Clients' information received.")
         logger.info("Performing aggregation...")
-        global_para = aggregate_lora_para(worker_list)
+        global_para = aggregate_para_dict(worker_list)
         logger.info("Aggregation finished and sending the newly aggregated paras back to clients")
         communication_parallel(worker_list, epoch_idx, comm, action="send_model",data=global_para)
         logger.info(f"Round {epoch_idx} finished")
@@ -139,7 +139,7 @@ def main():
      
     # close socket
     
-def aggregate_lora_para(worker_list):
+def aggregate_para_dict(worker_list):
     with torch.no_grad():
         aggregated_paras = worker_list[0].config.neighbor_paras
         for layer in aggregated_paras.keys():

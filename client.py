@@ -29,6 +29,9 @@ parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
 parser.add_argument('--use_cuda', action="store_false", default=True)
 
+parser.add_argument('--fune_type', type=str, choices=["FT", "FLoRA_QKV", "PLoRA_QKV"])
+parser.add_argument('--local_step', type=int, default=-1)
+
 args = parser.parse_args()
 
 comm = MPI.COMM_WORLD
@@ -110,6 +113,12 @@ def main():
     common_config.tag = 1
     # init config
     config = BertForMRCConfig()
+    if args.local_step != -1:
+        config.max_steps = args.local_step
+    config.batch_size = common_config.batch_size
+    config.logging_steps = config.max_steps // 10
+    logger.info(f"local step = {config.max_steps}")
+    logger.info(f"batch size = {config.batch_size}")
     
     config.model_dir = "/data/jliu/models"
     config.train_path = "/data/jliu/data/SQuAD"
@@ -120,7 +129,7 @@ def main():
     tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
     model = BertForQA(config)
     
-    ft_type = "FT"
+    ft_type = args.fune_type
     if ft_type == "FT":
         pass
     elif ft_type == "FLoRA_QKV":
@@ -141,6 +150,10 @@ def main():
         # model = prepare_model_for_int8_training(model)
 
         model = get_peft_model(model, lora_config)
+        # 设置head可训练 full lora
+        model._modules["base_model"]._modules["model"]._modules["BertModule"]._modules["qa_outputs"].weight.requires_grad = True
+        model._modules["base_model"]._modules["model"]._modules["BertModule"]._modules["qa_outputs"].bias.requires_grad = True
+        logger.info(f"The size of trainable parameters of the model is {model.get_nb_trainable_parameters()}")
     elif ft_type == "PLoRA_QKV":
         import loralib as lora
         target_attn_matrix = { # attn
@@ -166,6 +179,10 @@ def main():
                     lora_layer.bias = module.bias
                     model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
             lora.mark_only_lora_as_trainable(model)
+        # 设置head可训练
+        model._modules["BertModule"]._modules["qa_outputs"].weight.requires_grad = True
+        model._modules["BertModule"]._modules["qa_outputs"].bias.requires_grad = True
+            
     
     model.to(config.device)
     
@@ -173,7 +190,7 @@ def main():
     # logger.info(f"The size of trainable parameters of the peft model is {model.get_nb_trainable_parameters()}")
     logger.info(f"The model architecture --> ")
     for layer, para in model.named_parameters():
-        logger.info(layer)
+        logger.info(f"{layer} --> para.required_grad = {para.requires_grad}")
     
     logger.info(f"Loading dataset from {os.path.join(config.train_path, config.train_file)}")
     train_Dataset = SQuAD_V2_Dataset(tokenizer=tokenizer,data_dir=config.train_path,filename=config.train_file,is_training=True,config=config,cached_features_file=os.path.join(config.train_path,"cache_" + config.train_file.replace("json","data")))
@@ -211,15 +228,19 @@ def main():
             break
 
 async def local_procedure(comm, common_config, config:BertForMRCConfig, model:PeftModel, train_loader, tokenizer, rank, logger):
-    train_and_eval(config,model,train_loader,tokenizer, rank, logger)
-    import time
-    time.sleep(10)
+    train_and_eval(config,model,train_loader,tokenizer, rank, logger, common_config)
     # 本地训练结束，上传lora参数
     logger.info("Sending local parameters to the server")
     local_paras = dict()
-    for layer, paras in model.named_parameters():
-        if "lora" in layer:
+    # 不同的策略发送的参数不同
+    if args.fune_type == "FT":
+        # FT全模型发送
+        for layer, paras in model.named_parameters():
             local_paras[layer] = paras.clone().detach().to("cpu") # 都移动到cpu上方便聚合
+    else:
+        for layer, paras in model.named_parameters():
+            if "lora" in layer:
+                local_paras[layer] = paras.clone().detach().to("cpu") # 都移动到cpu上方便聚合
     await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=common_config.tag)
     logger.info("Waiting and Receiving aggregated paras from the server...")
     received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=common_config.tag)

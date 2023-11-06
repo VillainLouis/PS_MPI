@@ -18,7 +18,7 @@ from transformers import get_linear_schedule_with_warmup
 def to_list(tensor):
     return tensor.detach().cpu().tolist() if not tensor==torch.Size([0]) else None
 
-def train_and_eval(config,model,train_loader,tokenizer, rank, logger):
+def train_and_eval(config,model,train_loader,tokenizer, rank, logger, common_config):
     global_step = 0
     best_f1 = -1
     tr_loss, logging_loss = 0.0, 0.0
@@ -26,7 +26,8 @@ def train_and_eval(config,model,train_loader,tokenizer, rank, logger):
     t_total = config.max_steps * config.batch_size // config.gradient_accumulation_steps
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, eps=config.adam_epsilon)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=config.warmup_steps, num_training_steps=t_total)
+    logger.info(f"learning rate = {config.learning_rate}")
+    # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=config.warmup_steps, num_training_steps=t_total)
 
     # tb_writer = SummaryWriter()
 
@@ -52,8 +53,8 @@ def train_and_eval(config,model,train_loader,tokenizer, rank, logger):
 
         loss = span_loss
         if config.logging_steps > 0 and global_step % config.logging_steps == 0:
-            logger.info('training lr = {}'.format(scheduler.get_lr()[0]))
-            logger.info('training loss {}'.format((tr_loss - logging_loss)/config.logging_steps))
+            # logger.info('training lr = {}'.format(scheduler.get_lr()[0]))
+            logger.info('=========================== training loss {}'.format((tr_loss - logging_loss)/config.logging_steps))
             logging_loss = tr_loss
         
         tr_loss += loss.item()
@@ -61,17 +62,18 @@ def train_and_eval(config,model,train_loader,tokenizer, rank, logger):
         
         if (global_step + 1) % config.gradient_accumulation_steps == 0:
             optimizer.step()
-            scheduler.step()  # Update learning rate schedule
+            # scheduler.step()  # Update learning rate schedule
             model.zero_grad()
             # tqdm.write(str(loss))
     
     logger.info("Local Training finished.")
     
-    logger.info("Evaluation on test set...")
     # Evaluation
-    results = evaluate(config, model, tokenizer, rank)
-    for key, value in results.items():
-        logger.info('{}:{}'.format(key,value))
+    if  (common_config.tag == 1) or ((common_config.tag) % 5 == 0) or (common_config.tag + 1 == common_config.epoch+1):
+        logger.info("Evaluation on test set...")
+        results = evaluate(config, model, tokenizer, rank)
+        for key, value in results.items():
+            logger.info('{}:{}'.format(key,value))
         # tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
     # tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
     # tb_writer.add_scalar('loss', (tr_loss - logging_loss)/config.logging_steps, global_step)
@@ -133,6 +135,8 @@ def evaluate(config, model, tokenizer, rank, prefix=""):
     evalTime = timeit.default_timer() - start_time
 
     # Compute predictions
+    if not os.path.exists(config.output_dir):
+        os.mkdir(config.output_dir)
     output_prediction_file = os.path.join(config.output_dir, "__{}__predictions_{}.json".format(rank, prefix))
     output_nbest_file = os.path.join(config.output_dir, "__{}__nbest_predictions_{}.json".format(rank, prefix))
 
