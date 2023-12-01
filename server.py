@@ -39,6 +39,8 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 csize = comm.Get_size()
 
+device = f"cuda:{rank % torch.cuda.device_count()}"
+
 RESULT_PATH = os.getcwd() + '/server/'
 
 if not os.path.exists(RESULT_PATH):
@@ -55,13 +57,6 @@ formatter = logging.Formatter("%(message)s")
 fileHandler.setFormatter(formatter)
 logger.addHandler(fileHandler)
 
-def set_seed(config):
-    seed = config.seed
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if config.n_gpu > 0:
-        torch.cuda.manual_seed_all(seed)
 
 def main():
     logger.info("csize:{}".format(int(csize)))
@@ -82,16 +77,15 @@ def main():
 
     worker_num = int(csize)-1
 
-    from mymodels import BertForQA
-    config = BertForMRCConfig()
+    ###################################### init config #############################################
+    train_data_path = "/data/jliu/data/glue_data/SST-2/train.tsv"
+    test_data_path = "/data/jliu/data/glue_data/SST-2/dev.tsv"
+    pretrained_model_path = "/data/jliu/models/bert-base-uncased"
+
+    ###################################### init model ###############################################
+    from mymodels import SST
+    global_model = SST(pretrained_model_path)
     
-    config.model_dir = "/data/jliu/models"
-    config.train_path = "/data/jliu/data/SQuAD"
-    config.dev_path = "/data/jliu/data/SQuAD"
-    config.device = f"cuda:{rank % 8}"
-    set_seed(config)
-    tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
-    global_model = BertForQA(config)
     
     # global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
     init_para = torch.nn.utils.parameters_to_vector(global_model.parameters())
@@ -108,10 +102,18 @@ def main():
         )
     #到了这里，worker已经启动了
 
-    # Create model instance
+    ###################################### init server side dataset (train, test) and set data partition ####################################
     from mydatasets import RandomPartitioner
-    dataset_size = 130571 # SQuAD v2
-    train_data_partition = RandomPartitioner(data_len=dataset_size, partition_sizes=[1/worker_num for _ in range(worker_num)])
+    from mydatasets import SST_reader
+    train_dataset = SST_reader(train_data_path, 65)
+    test_dataset = SST_reader(test_data_path, 65)
+
+    # server test set
+    batch_size = 32
+    loader_test=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
+
+    # overall data partition
+    train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
     
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
@@ -120,7 +122,7 @@ def main():
         worker.config.train_data_idxes = train_data_partition.use(worker_idx)
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     
-    # connect socket and send init config
+    ###################### Sending init config to clients ###############################
     logger.info(f"Sending init config to all clients and start the training procedure")
     communication_parallel(worker_list, 1, comm, action="init")
 
@@ -130,15 +132,33 @@ def main():
         communication_parallel(worker_list, epoch_idx, comm, action="get_para")
         logger.info("Clients' information received.")
         logger.info("Performing aggregation...")
-        global_para = aggregate_para_dict(worker_list)
+        global_para = parameter_wise_aggregation(worker_list)
         logger.info("Aggregation finished and sending the newly aggregated paras back to clients")
         communication_parallel(worker_list, epoch_idx, comm, action="send_model",data=global_para)
         logger.info(f"Round {epoch_idx} finished")
+        # TODO: Test on server
         # test_loss, acc = test(global_model, test_loader, device, model_type=args.model_type)
         # logger.info("Epoch: {}, accuracy: {}, test_loss: {}\n".format(epoch_idx, acc, test_loss))
      
     # close socket
     
+def parameter_wise_aggregation(worker_list):
+    overall_para = dict()
+    with torch.no_grad():
+        for worker_idx in range(len(worker_list)):
+            for layer, paras in worker_list[worker_idx].config.neighbor_paras.items():
+                if layer not in overall_para:
+                    overall_para[layer] = dict()
+                    overall_para[layer]['cnt'] = 1
+                    overall_para[layer]['value'] = paras
+                else:
+                    overall_para[layer]['cnt'] += 1
+                    overall_para[layer]['value'] += paras
+    aggregate_para_dict = dict()
+    for layer in overall_para.keys():
+        aggregate_para_dict[layer] = overall_para[layer]['value'] / overall_para[layer]['cnt']
+    return aggregate_para_dict
+
 def aggregate_para_dict(worker_list):
     with torch.no_grad():
         aggregated_paras = worker_list[0].config.neighbor_paras

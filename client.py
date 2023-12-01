@@ -12,7 +12,6 @@ import mydatasets, mymodels
 from mpi4py import MPI
 import logging
 
-# TODO fix BertForQA model
 from mymodels import BertForQA
 from train_eval.train_eval import train_and_eval
 from mydatasets import SQuAD_V2_Dataset
@@ -24,6 +23,8 @@ import random
 from config import BertForMRCConfig
 from transformers import BertTokenizer, AutoTokenizer
 from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
+
+from numpy import mean
 
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
@@ -38,11 +39,7 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 csize = comm.Get_size()
 
-# if args.visible_cuda == '-1':
-#     os.environ['CUDA_VISIBLE_DEVICES'] = str(int(rank)% 4 + 0)
-# else:
-#     os.environ['CUDA_VISIBLE_DEVICES'] = args.visible_cuda
-# device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
+device = f"cuda:{rank % torch.cuda.device_count()}"
 
 
 # init logger
@@ -70,14 +67,6 @@ async def get_init_config(comm, MASTER_RANK, config):
     for k, v in config_received.__dict__.items():
         setattr(config, k, v)
 
-def set_seed(config):
-    seed = config.seed
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if config.n_gpu > 0:
-        torch.cuda.manual_seed_all(seed)
-
 def main():
     logger.info("client_rank:{}".format(rank))
     client_config = ClientConfig(
@@ -94,7 +83,7 @@ def main():
     tasks.append(task)
     loop.run_until_complete(asyncio.wait(tasks))
     loop.close()
-    logger.info("Acknowledged.")
+    logger.info("init config acknowledged.")
     
     common_config = CommonConfig()
     common_config.model_type = client_config.common_config.model_type
@@ -111,102 +100,44 @@ def main():
     common_config.para=client_config.para
     
     common_config.tag = 1
-    # init config
-    config = BertForMRCConfig()
-    if args.local_step != -1:
-        config.max_steps = args.local_step
-    config.batch_size = common_config.batch_size
-    config.logging_steps = config.max_steps // 10
-    logger.info(f"local step = {config.max_steps}")
-    logger.info(f"batch size = {config.batch_size}")
-    
-    config.model_dir = "/data/jliu/models"
-    config.train_path = "/data/jliu/data/SQuAD"
-    config.dev_path = "/data/jliu/data/SQuAD"
-    config.device = f"cuda:{rank % torch.cuda.device_count()}"
-    set_seed(config)
-    logger.info(f"Loading pretrained model from {os.path.join(config.model_dir,config.model_name)}...")
-    tokenizer = BertTokenizer.from_pretrained(os.path.join(config.model_dir,config.model_name))
-    model = BertForQA(config)
-    
-    ft_type = args.fune_type
-    if ft_type == "FT":
-        pass
-    elif ft_type == "FLoRA_QKV":
-        target_modules = ["query", "key", "value"]
-        logger.info("Finished.")
-        
-        lora_config = LoraConfig(
-            r = 8,
-            lora_alpha = 32,
-            target_modules=target_modules,
-            lora_dropout = 0.05,
-            bias = "none",
-            task_type = "QA",
-        )
-        logger.info(f"lora config --> {lora_config}")
-        
-        
-        # model = prepare_model_for_int8_training(model)
+    ################################### init config #######################################
+    # TODO: make it an args
+    pretrained_model_path = "/data/jliu/models/bert-base-uncased"
+    train_data_path = "/data/jliu/data/glue_data/SST-2/train.tsv"
+    test_data_path = "/data/jliu/data/glue_data/SST-2/dev.tsv"
 
-        model = get_peft_model(model, lora_config)
-        # 设置head可训练 full lora
-        model._modules["base_model"]._modules["model"]._modules["BertModule"]._modules["qa_outputs"].weight.requires_grad = True
-        model._modules["base_model"]._modules["model"]._modules["BertModule"]._modules["qa_outputs"].bias.requires_grad = True
-        logger.info(f"The size of trainable parameters of the model is {model.get_nb_trainable_parameters()}")
-    elif ft_type == "PLoRA_QKV":
-        import loralib as lora
-        target_attn_matrix = { # attn
-            "9": ["query", "key", "value"],
-            "10": ["query", "key", "value"],
-            "11": ["query", "key", "value"]
-        }
-        target_ffn_matrix = { # ffn
-            "11": ["intermediate", "output"]
-        }
-        for layer in target_attn_matrix.keys():
-            for matrix in target_attn_matrix[layer]:
-                module = model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
-                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=8, lora_alpha=32)
-                lora_layer.weight = module.weight
-                lora_layer.bias = module.bias
-                model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
-            for layer in target_ffn_matrix.keys():
-                for matrix in target_ffn_matrix[layer]:
-                    module = model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
-                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=8, lora_alpha=32)
-                    lora_layer.weight = module.weight
-                    lora_layer.bias = module.bias
-                    model._modules["BertModule"]._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
-            lora.mark_only_lora_as_trainable(model)
-        # 设置head可训练
-        model._modules["BertModule"]._modules["qa_outputs"].weight.requires_grad = True
-        model._modules["BertModule"]._modules["qa_outputs"].bias.requires_grad = True
-            
+    ################################## init local model ###################################### 
+    from mymodels import SST
+    model = SST(pretrained_model_path)
     
-    model.to(config.device)
-    
-    logger.info(f"Fine-Tuning type = {ft_type}")
-    # logger.info(f"The size of trainable parameters of the peft model is {model.get_nb_trainable_parameters()}")
+    model.to(device)
+    model.train()
+    # TODO:according to different method, set the trainable parameters of the model
+
     logger.info(f"The model architecture --> ")
+    trainable_paras = 0
+    all_paras = 0
     for layer, para in model.named_parameters():
-        logger.info(f"{layer} --> para.required_grad = {para.requires_grad}")
+        all_paras += para.numel()
+        if para.requires_grad:
+            logger.info(f"{layer} --> para.shape = {para.shape}")
+            trainable_paras += para.numel()
+    logger.info(f"Trainable paras: {trainable_paras}, all paras: {all_paras} ---> {trainable_paras / all_paras}")
     
-    logger.info(f"Loading dataset from {os.path.join(config.train_path, config.train_file)}")
-    train_Dataset = SQuAD_V2_Dataset(tokenizer=tokenizer,data_dir=config.train_path,filename=config.train_file,is_training=True,config=config,cached_features_file=os.path.join(config.train_path,"cache_" + config.train_file.replace("json","data")))
-    train_features,train_dataset = train_Dataset.features,train_Dataset.dataset
-    logger.info("Finished.")
+    ########################################## init training and test set ##################################
+    from mydatasets import SST_reader
+    train_dataset = SST_reader(train_data_path, 65)
+    test_dataset = SST_reader(test_data_path, 65)
 
-    train_loader = mydatasets.create_dataloaders(dataset=train_dataset, batch_size=config.batch_size, selected_idxs=client_config.train_data_idxes)
+    optimizer=torch.optim.AdamW(model.parameters(),2e-5) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
+    batch_size = 32
+    loader_train=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
+    loader_test=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
 
     
-    # Train!
+    ######################################### begin training #################################################
     logger.info("***** Running training *****")
-    logger.info("  Num examples = %d", len(client_config.train_data_idxes))
-    logger.info("  Num local steps = %d", config.max_steps)
-    logger.info("  Instantaneous batch size per GPU = %d", config.batch_size)
     
-
     while True:
         # 开始本地训练
         logger.info(f"##################### Round {common_config.tag} start ... #########################")
@@ -216,7 +147,8 @@ def main():
         tasks.append(
             asyncio.ensure_future(
                 # train_and_eval(config,model,train_loader,tokenizer, rank, logger)
-                local_procedure(comm, common_config, config, model, train_loader, tokenizer, rank, logger)
+                # local_procedure(comm, common_config, config, model, train_loader, tokenizer, rank, logger)
+                ada_lora_fl(comm, common_config, model, optimizer, loader_train, loader_test, logger)
             )
         )
         loop.run_until_complete(asyncio.wait(tasks))
@@ -226,6 +158,72 @@ def main():
         common_config.tag += 1
         if common_config.tag==common_config.epoch+1:
             break
+
+async def ada_lora_fl(comm, common_config, model, optimizer, loader_train, loader_test, logger):
+    ######################### Trainer: local training ############################
+    epoch = 0
+    # Training
+    for i in range(epoch):
+        logger.info(f"################# training epoch {i} ###################")
+        model.train()
+        loss_sum=[]
+        correct=0
+        total=0
+        for num,(label,mask,token) in enumerate(loader_train):
+            label=label.to(device)
+            mask=mask.to(device)
+            token=token.to(device)
+            pre,loss=model(label,mask,token)
+            loss_sum.append(loss.item())
+            pre=torch.argmax(pre,-1)
+            correct+=(pre==label).sum().cpu().item()
+            total+=label.shape[0]
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        logger.info(f"training loss: {mean(loss_sum)}")
+        logger.info(f"training accuracy: {correct/total}")
+        model.eval()
+        loss_sum=[]
+        correct=0
+        total=0
+        with torch.no_grad():
+            logger.info(f"evaluation...")
+            for num, (label, mask, token) in enumerate(loader_test):
+                label = label.to(device)
+                mask = mask.to(device)
+                token = token.to(device)
+                pre, loss = model(label, mask, token)
+                loss_sum.append(loss.item())
+                pre = torch.argmax(pre, -1)
+                correct += (pre == label).sum().cpu().item()
+                total += label.shape[0]
+            logger.info(f"test loss: {mean(loss_sum)}")
+            logger.info(f"test accuracy: {str(correct / total)}")
+    
+    ######################### Maintainer: updating ###############################
+    logger.info("Sending local parameters to the server")
+    local_paras = dict()
+    
+    # 发送所有可以训练的参数
+    trainable_paras = 0
+    all_paras = 0
+    for layer, paras in model.named_parameters():
+        all_paras += paras.numel()
+        if paras.requires_grad:
+            local_paras[layer] = paras.clone().detach().to("cpu") # 都移动到cpu上方便聚合
+            trainable_paras += paras.numel()
+    
+    await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=common_config.tag)
+    logger.info("Waiting and Receiving aggregated paras from the server...")
+    received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=common_config.tag)
+    logger.info("Updating local model with the received paras...")
+    model_state_dict = model.state_dict()
+    # update paras
+    for layer, paras in received_paras.items():
+        model_state_dict[layer] = paras.to(device)
+    # TODO: according to the resource constraint, update trainable paras
+
 
 async def local_procedure(comm, common_config, config:BertForMRCConfig, model:PeftModel, train_loader, tokenizer, rank, logger):
     train_and_eval(config,model,train_loader,tokenizer, rank, logger, common_config)
