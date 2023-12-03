@@ -210,13 +210,28 @@ def create_dataloaders(dataset, batch_size, selected_idxs=None, shuffle=True, pi
         partition = Partition(dataset, selected_idxs)
         dataloader = DataLoader(partition, batch_size=batch_size,
                                     shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers)
-    
-    return SQuAD_V2_DataLoaderHelper(dataloader)
+                                    
+    return SST2_DataLoaderHelper(dataloader)
+
+
+class SST2_DataLoaderHelper(object):
+    def __init__(self, dataloader):
+        self.loader = dataloader
+        self.dataiter = iter(self.loader)
+
+    def __next__(self):
+        try:
+            label, mask, ids = next(self.dataiter)
+        except StopIteration:
+            self.dataiter = iter(self.loader)
+            label, mask, ids = next(self.dataiter)
+        
+        return label, mask, ids
 
 def load_datasets(dataset_type, data_path="/data/jliu/data"):
-    
-    train_transform = load_default_transform(dataset_type, train=True)
-    test_transform = load_default_transform(dataset_type, train=False)
+    if dataset_type != "SST-2":
+        train_transform = load_default_transform(dataset_type, train=True)
+        test_transform = load_default_transform(dataset_type, train=False)
 
     if dataset_type == 'CIFAR10':
         train_dataset = datasets.CIFAR10(data_path, train = True, 
@@ -261,6 +276,10 @@ def load_datasets(dataset_type, data_path="/data/jliu/data"):
     elif dataset_type == 'image100':
         train_dataset = datasets.ImageFolder('/data1/ymliao/data/IMAGE100/train', transform = train_transform)
         test_dataset = datasets.ImageFolder('/data1/ymliao/data/IMAGE100/test', transform = train_transform)
+    
+    elif dataset_type == 'SST-2':
+        train_dataset = SST_reader("/data/jliu/data/glue_data/SST-2/train.tsv", 65)
+        test_dataset = SST_reader("/data/jliu/data/glue_data/SST-2/dev.tsv", 65)
 
     return train_dataset, test_dataset
 

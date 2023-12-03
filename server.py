@@ -18,8 +18,8 @@ import random
 
 #init parameters
 parser = argparse.ArgumentParser(description='Distributed Client')
-parser.add_argument('--dataset_type', type=str, default='CIFAR10')
-parser.add_argument('--model_type', type=str, default='AlexNet')
+parser.add_argument('--dataset_type', type=str, default='SST-2')
+parser.add_argument('--model_type', type=str, default='Bert')
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--data_pattern', type=int, default=0)
 parser.add_argument('--lr', type=float, default=0.1)
@@ -78,8 +78,6 @@ def main():
     worker_num = int(csize)-1
 
     ###################################### init config #############################################
-    train_data_path = "/data/jliu/data/glue_data/SST-2/train.tsv"
-    test_data_path = "/data/jliu/data/glue_data/SST-2/dev.tsv"
     pretrained_model_path = "/data/jliu/models/bert-base-uncased"
 
     ###################################### init model ###############################################
@@ -88,9 +86,8 @@ def main():
     
     
     # global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
-    init_para = torch.nn.utils.parameters_to_vector(global_model.parameters())
-    common_config.para_nums=init_para.nelement()
-    model_size = init_para.nelement() * 4 / 1024 / 1024
+    common_config.para_nums = sum(p.numel() for p in global_model.parameters())
+    model_size = common_config.para_nums * 4 / 1024 / 1024
     logger.info("para num: {}".format(common_config.para_nums))
     logger.info("Model Size: {} MB".format(model_size))
 
@@ -104,13 +101,8 @@ def main():
 
     ###################################### init server side dataset (train, test) and set data partition ####################################
     from mydatasets import RandomPartitioner
-    from mydatasets import SST_reader
-    train_dataset = SST_reader(train_data_path, 65)
-    test_dataset = SST_reader(test_data_path, 65)
-
-    # server test set
-    batch_size = 32
-    loader_test=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
+    train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=32, shuffle=False)
 
     # overall data partition
     train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
@@ -118,8 +110,10 @@ def main():
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
     for worker_idx, worker in enumerate(worker_list):
-        worker.config.para = init_para
+        worker.config.para = global_model.state_dict()
         worker.config.train_data_idxes = train_data_partition.use(worker_idx)
+        worker.config.source_train_dataset = train_dataset
+        worker.config.test_dataset = test_dataset
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     
     ###################### Sending init config to clients ###############################

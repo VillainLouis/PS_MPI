@@ -51,8 +51,13 @@ class ClientConfig:
                 common_config,
                 custom: dict = dict()
                 ):
+        # client 自己的模型参数
         self.para = None
+        # client 自己的dataset
         self.train_data_idxes = None
+        self.source_train_dataset = None
+        self.test_dataset = None
+
         self.common_config=common_config
 
         self.average_weight=0.1

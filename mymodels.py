@@ -87,6 +87,10 @@ def create_model_instance(dataset_type, model_type, class_num=10):
         elif model_type == 'VGG16':
             model = VGG16_IMAGE()
     
+    elif dataset_type == 'SST-2':
+        if model_type == "Bert":
+            model = SST("/data/jliu/models/bert-base-uncased")
+    
     return model
 
 class VGG16_IMAGE(nn.Module):

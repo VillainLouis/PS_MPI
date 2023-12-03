@@ -5,6 +5,7 @@ import asyncio
 import numpy as np
 import torch
 import torch.optim as optim
+from torch.nn.utils import vector_to_parameters
 from config import ClientConfig, CommonConfig
 from comm_utils import *
 from training_utils import train, test
@@ -40,6 +41,12 @@ rank = comm.Get_rank()
 csize = comm.Get_size()
 
 device = f"cuda:{rank % torch.cuda.device_count()}"
+
+# if args.visible_cuda == '-1':
+#     os.environ['CUDA_VISIBLE_DEVICES'] = str(int(rank)% 4 + 0)
+# else:
+#     os.environ['CUDA_VISIBLE_DEVICES'] = args.visible_cuda
+# device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
 
 # init logger
@@ -100,16 +107,10 @@ def main():
     common_config.para=client_config.para
     
     common_config.tag = 1
-    ################################### init config #######################################
-    # TODO: make it an args
-    pretrained_model_path = "/data/jliu/models/bert-base-uncased"
-    train_data_path = "/data/jliu/data/glue_data/SST-2/train.tsv"
-    test_data_path = "/data/jliu/data/glue_data/SST-2/dev.tsv"
 
-    ################################## init local model ###################################### 
-    from mymodels import SST
-    model = SST(pretrained_model_path)
-    
+    model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
+    model.load_state_dict(common_config.para)
+
     model.to(device)
     model.train()
     # TODO:according to different method, set the trainable parameters of the model
@@ -122,22 +123,25 @@ def main():
         if para.requires_grad:
             logger.info(f"{layer} --> para.shape = {para.shape}")
             trainable_paras += para.numel()
+
+        if "out_layer" in layer:
+            logger.info(f"{layer} --> {para}")
     logger.info(f"Trainable paras: {trainable_paras}, all paras: {all_paras} ---> {trainable_paras / all_paras}")
     
     ########################################## init training and test set ##################################
-    from mydatasets import SST_reader
-    train_dataset = SST_reader(train_data_path, 65)
-    test_dataset = SST_reader(test_data_path, 65)
+    train_dataset = client_config.source_train_dataset
+    test_dataset = client_config.test_dataset
+
+    train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes)
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=32, shuffle=False)
+    # TODO: using train_data_idxes to set the local train loader
 
     optimizer=torch.optim.AdamW(model.parameters(),2e-5) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
-    batch_size = 32
-    loader_train=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
-    loader_test=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
+    # batch_size = 32
+    # train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
+    # test_loader=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
+    
 
-    
-    ######################################### begin training #################################################
-    logger.info("***** Running training *****")
-    
     while True:
         # 开始本地训练
         logger.info(f"##################### Round {common_config.tag} start ... #########################")
@@ -148,7 +152,7 @@ def main():
             asyncio.ensure_future(
                 # train_and_eval(config,model,train_loader,tokenizer, rank, logger)
                 # local_procedure(comm, common_config, config, model, train_loader, tokenizer, rank, logger)
-                ada_lora_fl(comm, common_config, model, optimizer, loader_train, loader_test, logger)
+                ada_lora_fl(comm, common_config, model, optimizer, train_loader, len(client_config.train_data_idxes), test_loader, logger)
             )
         )
         loop.run_until_complete(asyncio.wait(tasks))
@@ -159,17 +163,21 @@ def main():
         if common_config.tag==common_config.epoch+1:
             break
 
-async def ada_lora_fl(comm, common_config, model, optimizer, loader_train, loader_test, logger):
+async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_train, test_loader, logger):
     ######################### Trainer: local training ############################
-    epoch = 0
+    local_steps = 210
     # Training
+    for i in range(local_steps):
+        if i % (num_train / common_config.batch_size) == 0:
+            logger.info(f"################# training epoch {i} ###################")
+    epoch = 0
     for i in range(epoch):
         logger.info(f"################# training epoch {i} ###################")
         model.train()
         loss_sum=[]
         correct=0
         total=0
-        for num,(label,mask,token) in enumerate(loader_train):
+        for num,(label,mask,token) in enumerate(train_loader):
             label=label.to(device)
             mask=mask.to(device)
             token=token.to(device)
@@ -189,7 +197,7 @@ async def ada_lora_fl(comm, common_config, model, optimizer, loader_train, loade
         total=0
         with torch.no_grad():
             logger.info(f"evaluation...")
-            for num, (label, mask, token) in enumerate(loader_test):
+            for num, (label, mask, token) in enumerate(test_loader):
                 label = label.to(device)
                 mask = mask.to(device)
                 token = token.to(device)
