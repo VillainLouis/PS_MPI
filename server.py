@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import time
 import numpy as np
+from numpy import mean
 import torch
 from config import *
 import torch.nn.functional as F
@@ -102,7 +103,7 @@ def main():
     ###################################### init server side dataset (train, test) and set data partition ####################################
     from mydatasets import RandomPartitioner
     train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
-    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=32, shuffle=False)
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False)
 
     # overall data partition
     train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
@@ -129,11 +130,30 @@ def main():
         global_para = parameter_wise_aggregation(worker_list)
         logger.info("Aggregation finished and sending the newly aggregated paras back to clients")
         communication_parallel(worker_list, epoch_idx, comm, action="send_model",data=global_para)
+        logger.info(f"TEST on server...")
+        global_model_sd = global_model.state_dict()
+        global_model_sd.update(global_para)
+        global_model.load_state_dict(global_model_sd)
+        global_model.to("cuda:0")
+        global_model.eval()
+        loss_sum=[]
+        correct=0
+        total=0
+        with torch.no_grad():
+            logger.info(f"evaluation...")
+            for num, (label, mask, token) in enumerate(test_loader):
+                label = label.to(device)
+                mask = mask.to(device)
+                token = token.to(device)
+                pre, loss = global_model(label, mask, token)
+                loss_sum.append(loss.item())
+                pre = torch.argmax(pre, -1)
+                correct += (pre == label).sum().cpu().item()
+                total += label.shape[0]
+            logger.info(f"test loss: {mean(loss_sum)}")
+            logger.info(f"test accuracy: {str(correct / total)}")
         logger.info(f"Round {epoch_idx} finished")
-        # TODO: Test on server
-        # test_loss, acc = test(global_model, test_loader, device, model_type=args.model_type)
-        # logger.info("Epoch: {}, accuracy: {}, test_loss: {}\n".format(epoch_idx, acc, test_loss))
-     
+
     # close socket
     
 def parameter_wise_aggregation(worker_list):

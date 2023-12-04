@@ -210,8 +210,10 @@ def create_dataloaders(dataset, batch_size, selected_idxs=None, shuffle=True, pi
         partition = Partition(dataset, selected_idxs)
         dataloader = DataLoader(partition, batch_size=batch_size,
                                     shuffle=shuffle, pin_memory=pin_memory, num_workers=num_workers)
+        # TODO: set diff dataset
+        dataloader = SST2_DataLoaderHelper(dataloader)
                                     
-    return SST2_DataLoaderHelper(dataloader)
+    return dataloader
 
 
 class SST2_DataLoaderHelper(object):

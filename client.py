@@ -115,7 +115,7 @@ def main():
     model.train()
     # TODO:according to different method, set the trainable parameters of the model
 
-    logger.info(f"The model architecture --> ")
+    logger.info(f"Trainable parameters info --> ")
     trainable_paras = 0
     all_paras = 0
     for layer, para in model.named_parameters():
@@ -132,9 +132,9 @@ def main():
     train_dataset = client_config.source_train_dataset
     test_dataset = client_config.test_dataset
 
+    logger.info(f"len(client_config.train_data_idxes) = {len(client_config.train_data_idxes)}")
     train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes)
-    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=32, shuffle=False)
-    # TODO: using train_data_idxes to set the local train loader
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False)
 
     optimizer=torch.optim.AdamW(model.parameters(),2e-5) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
     # batch_size = 32
@@ -165,49 +165,49 @@ def main():
 
 async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_train, test_loader, logger):
     ######################### Trainer: local training ############################
-    local_steps = 210
+    local_steps = num_train // common_config.batch_size
+    logger.info(f"the number of train data: {num_train}, batch size: {common_config.batch_size}")
+    logger.info(f"local steps = {local_steps}")
+    # TODO: set local step
     # Training
+    model.train()
+    loss_sum=[]
+    correct=0
+    total=0
     for i in range(local_steps):
         if i % (num_train / common_config.batch_size) == 0:
             logger.info(f"################# training epoch {i} ###################")
-    epoch = 0
-    for i in range(epoch):
-        logger.info(f"################# training epoch {i} ###################")
-        model.train()
-        loss_sum=[]
-        correct=0
-        total=0
-        for num,(label,mask,token) in enumerate(train_loader):
-            label=label.to(device)
-            mask=mask.to(device)
-            token=token.to(device)
-            pre,loss=model(label,mask,token)
+        label, mask, token = next(train_loader)
+        label=label.to(device)
+        mask=mask.to(device)
+        token=token.to(device)
+        pre,loss=model(label,mask,token)
+        loss_sum.append(loss.item())
+        pre=torch.argmax(pre,-1)
+        correct+=(pre==label).sum().cpu().item()
+        total+=label.shape[0]
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+    logger.info(f"training loss: {mean(loss_sum)}")
+    logger.info(f"training accuracy: {correct/total}")
+    model.eval()
+    loss_sum=[]
+    correct=0
+    total=0
+    with torch.no_grad():
+        logger.info(f"evaluation...")
+        for num, (label, mask, token) in enumerate(test_loader):
+            label = label.to(device)
+            mask = mask.to(device)
+            token = token.to(device)
+            pre, loss = model(label, mask, token)
             loss_sum.append(loss.item())
-            pre=torch.argmax(pre,-1)
-            correct+=(pre==label).sum().cpu().item()
-            total+=label.shape[0]
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-        logger.info(f"training loss: {mean(loss_sum)}")
-        logger.info(f"training accuracy: {correct/total}")
-        model.eval()
-        loss_sum=[]
-        correct=0
-        total=0
-        with torch.no_grad():
-            logger.info(f"evaluation...")
-            for num, (label, mask, token) in enumerate(test_loader):
-                label = label.to(device)
-                mask = mask.to(device)
-                token = token.to(device)
-                pre, loss = model(label, mask, token)
-                loss_sum.append(loss.item())
-                pre = torch.argmax(pre, -1)
-                correct += (pre == label).sum().cpu().item()
-                total += label.shape[0]
-            logger.info(f"test loss: {mean(loss_sum)}")
-            logger.info(f"test accuracy: {str(correct / total)}")
+            pre = torch.argmax(pre, -1)
+            correct += (pre == label).sum().cpu().item()
+            total += label.shape[0]
+        logger.info(f"test loss: {mean(loss_sum)}")
+        logger.info(f"test accuracy: {str(correct / total)}")
     
     ######################### Maintainer: updating ###############################
     logger.info("Sending local parameters to the server")
