@@ -17,6 +17,8 @@ from mpi4py import MPI
 import logging
 import random
 
+from noniid_label import label_skew_process
+
 #init parameters
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--dataset_type', type=str, default='SST-2')
@@ -31,6 +33,8 @@ parser.add_argument('--momentum', type=float, default=-1)
 parser.add_argument('--weight_decay', type=float, default=0.0)
 parser.add_argument('--data_path', type=str, default='/data/jliu/data')
 parser.add_argument('--use_cuda', action="store_false", default=True)
+parser.add_argument('--alpha', type=float, default=1.0)
+
 
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
@@ -40,6 +44,7 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 csize = comm.Get_size()
 
+alpha = args.alpha
 device = f"cuda:{rank % torch.cuda.device_count()}"
 
 RESULT_PATH = os.getcwd() + '/server/'
@@ -105,14 +110,23 @@ def main():
     train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
     test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False)
 
-    # overall data partition
-    train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
+    # use alpha to control the overall data partition
+    if args.dataset_type == "SST-2":
+        label_vocab = {'negative': 0, 'positive': 1}
+        label_map = {0 : 'negative', 1 : 'positive'}
+        label_assignment_train = np.array([
+            label_map[int(train_dataset[idx][0])]
+            for idx in range(len(train_dataset))
+        ])
+        train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset))
+    # train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
     
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
     for worker_idx, worker in enumerate(worker_list):
         worker.config.para = global_model.state_dict()
-        worker.config.train_data_idxes = train_data_partition.use(worker_idx)
+        # worker.config.train_data_idxes = train_data_partition.use(worker_idx)
+        worker.config.train_data_idxes = train_data_partition[worker_idx]
         worker.config.source_train_dataset = train_dataset
         worker.config.test_dataset = test_dataset
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
