@@ -34,7 +34,7 @@ parser.add_argument('--weight_decay', type=float, default=0.0)
 parser.add_argument('--data_path', type=str, default='/data/jliu/data')
 parser.add_argument('--use_cuda', action="store_false", default=True)
 parser.add_argument('--alpha', type=float, default=1.0)
-
+parser.add_argument('--seed', type=int, default=42)
 
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
@@ -43,6 +43,9 @@ device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 csize = comm.Get_size()
+
+np.random.seed(args.seed)
+random.seed(args.seed)
 
 alpha = args.alpha
 device = f"cuda:{rank % torch.cuda.device_count()}"
@@ -118,7 +121,7 @@ def main():
             label_map[int(train_dataset[idx][0])]
             for idx in range(len(train_dataset))
         ])
-        train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset))
+        train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
     # train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
     
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)

@@ -92,7 +92,7 @@ def dynamic_batch_fill(label_index_tracker, label_index_matrix,
 
 
 def label_skew_process(label_vocab, label_assignment, client_num, alpha,
-                       data_length):
+                       data_length, logger):
     """
     params
     -------------------------------------------------------------------
@@ -133,6 +133,7 @@ def label_skew_process(label_vocab, label_assignment, client_num, alpha,
         each_client_partition_result = partition_result[client_id]
         proportions = np.random.dirichlet(client_dir_dis)
         print(client_id,proportions)
+        logger.info(f"client {client_id}'s data proportion is {proportions}.")
         print(type(proportions[0]))
         while True in np.isnan(proportions):
             proportions = np.random.dirichlet(client_dir_dis)

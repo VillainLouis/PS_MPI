@@ -16,7 +16,7 @@ class Worker:
         await send_data(comm, data, self.rank, epoch_idx)    
 
     async def send_init_config(self, comm, epoch_idx):
-        print("before send", self.rank, "tag:", epoch_idx)
+        print(f"sending init config to {self.rank}")
         await send_data(comm, self.config, self.rank, epoch_idx)    
 
     async def get_model(self, comm, epoch_idx):
