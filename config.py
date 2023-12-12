@@ -42,9 +42,9 @@ class CommonConfig:
         self.para = None
         self.data_path = None
         #这里用来存worker的
-        self.bert_mrc_config = BertForMRCConfig()
-        self.lora_layers = []
-
+        # self.bert_mrc_config = BertForMRCConfig()
+        # self.lora_layers = []
+        self.finetune_type = None
 
 class ClientConfig:
     def __init__(self,

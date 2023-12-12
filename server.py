@@ -10,7 +10,7 @@ from config import *
 import torch.nn.functional as F
 import mydatasets
 import mymodels
-from training_utils import test
+from training_utils import test, eval_step
 
 from mpi4py import MPI
 
@@ -18,23 +18,26 @@ import logging
 import random
 
 from noniid_label import label_skew_process
+from glue_utils import prepare_inputs
 
 #init parameters
 parser = argparse.ArgumentParser(description='Distributed Client')
-parser.add_argument('--dataset_type', type=str, default='SST-2')
+parser.add_argument('--dataset_type', type=str, default='sst2')
 parser.add_argument('--model_type', type=str, default='Bert')
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--data_pattern', type=int, default=0)
-parser.add_argument('--lr', type=float, default=0.1)
+parser.add_argument('--lr', type=float, default=1e-5)
 parser.add_argument('--decay_rate', type=float, default=0.99)
 parser.add_argument('--min_lr', type=float, default=0.001)
-parser.add_argument('--epoch', type=int, default=20)
+parser.add_argument('--epoch', type=int, default=50)
 parser.add_argument('--momentum', type=float, default=-1)
 parser.add_argument('--weight_decay', type=float, default=0.0)
 parser.add_argument('--data_path', type=str, default='/data/jliu/data')
 parser.add_argument('--use_cuda', action="store_false", default=True)
 parser.add_argument('--alpha', type=float, default=1.0)
 parser.add_argument('--seed', type=int, default=42)
+
+parser.add_argument('--finetune_type', type=str, choices=["fedft", "fedlora", "fedadapter", "our"])
 
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
@@ -84,14 +87,20 @@ def main():
     common_config.data_path = args.data_path
     common_config.weight_decay = args.weight_decay
 
+    common_config.finetune_type = args.finetune_type
+
     worker_num = int(csize)-1
 
     ###################################### init config #############################################
     pretrained_model_path = "/data/jliu/models/bert-base-uncased"
 
     ###################################### init model ###############################################
-    from mymodels import SST
-    global_model = SST(pretrained_model_path)
+    # from mymodels import SST
+    # global_model = SST(pretrained_model_path)
+    from mymodels import CustomBERTModel
+    logger.info(f"\nLoading pre-trained BERT model \"{pretrained_model_path}\"")
+    num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
+    global_model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
     
     
     # global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
@@ -110,26 +119,52 @@ def main():
 
     ###################################### init server side dataset (train, test) and set data partition ####################################
     from mydatasets import RandomPartitioner
-    train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
-    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False)
+    # train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
+    if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli"]:
+        from mydatasets import get_glue_dataset
+        train_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "train", batch_size=common_config.batch_size)
+        test_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "validation", batch_size=common_config.batch_size)
+        from transformers import BertTokenizerFast
+        from transformers.data.data_collator import DataCollatorWithPadding
+        tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
+        data_collator = DataCollatorWithPadding(tokenizer)
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False, collate_fn=data_collator)
+
+    # dataloader = DataLoader(
+    #                 encoded_dataset[split],
+    #                 shuffle=shuffle,
+    #                 batch_size=batch_size,
+    #                 collate_fn=data_collator,
+    #                 drop_last=dataloader_drop_last,
+    #                 num_workers=dataloader_num_workers,
+    #                 pin_memory=dataloader_pin_memory,
+    # )
 
     # use alpha to control the overall data partition
-    if args.dataset_type == "SST-2":
-        label_vocab = {'negative': 0, 'positive': 1}
-        label_map = {0 : 'negative', 1 : 'positive'}
-        label_assignment_train = np.array([
-            label_map[int(train_dataset[idx][0])]
-            for idx in range(len(train_dataset))
-        ])
-        train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
-    # train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
+    if args.data_pattern != 0:
+        logger.info("non-IID partition prepare...")
+        if args.dataset_type == "sst2":    
+            label_vocab = {'negative': 0, 'positive': 1}
+            label_map = {0 : 'negative', 1 : 'positive'}
+            label_assignment_train = np.array([
+                label_map[int(train_dataset[idx]['label'])]
+                for idx in range(len(train_dataset))
+            ])
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+        else:
+            raise NotImplementedError
+    else:
+        logger.info("IID partition...")
+        train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
     
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
     for worker_idx, worker in enumerate(worker_list):
         worker.config.para = global_model.state_dict()
-        # worker.config.train_data_idxes = train_data_partition.use(worker_idx)
-        worker.config.train_data_idxes = train_data_partition[worker_idx]
+        if args.data_pattern != 0:
+            worker.config.train_data_idxes = train_data_partition[worker_idx]
+        else:
+            worker.config.train_data_idxes = train_data_partition.use(worker_idx)
         worker.config.source_train_dataset = train_dataset
         worker.config.test_dataset = test_dataset
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
@@ -153,22 +188,29 @@ def main():
         global_model.load_state_dict(global_model_sd)
         global_model.to("cuda:0")
         global_model.eval()
-        loss_sum=[]
-        correct=0
-        total=0
-        with torch.no_grad():
-            logger.info(f"evaluation...")
-            for num, (label, mask, token) in enumerate(test_loader):
-                label = label.to(device)
-                mask = mask.to(device)
-                token = token.to(device)
-                pre, loss = global_model(label, mask, token)
-                loss_sum.append(loss.item())
-                pre = torch.argmax(pre, -1)
-                correct += (pre == label).sum().cpu().item()
-                total += label.shape[0]
-            logger.info(f"test loss: {mean(loss_sum)}")
-            logger.info(f"test accuracy: {str(correct / total)}")
+        
+        if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli"]:
+             # evaluation
+            iterator = iter(test_loader)
+            trange = range(len(test_loader))
+            loss_all=[]
+            metric_name = global_model.metric.name
+            metric_1_name = None if global_model.metric_1 is None else global_model.metric_1.name
+            metric_all=[]
+            metric_1_all = []
+            for step in trange:
+                inputs = prepare_inputs(next(iterator), device)
+                step_loss, step_metric, step_metric_1 = eval_step(global_model, inputs)
+                loss_all.append(step_loss.item())
+                metric_all.append(step_metric[global_model.metric.name])
+                if global_model.metric_1 is not None: 
+                    metric_1_all.append(step_metric_1[global_model.metric_1.name])
+                
+            logger.info(f"test loss --> {mean(loss_all)}")
+            logger.info(f"test {metric_name} --> {mean(metric_all)} ")
+            if global_model.metric_1 is not None:
+                logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
+
         logger.info(f"Round {epoch_idx} finished")
 
     # close socket

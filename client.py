@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.nn.utils import vector_to_parameters
 from config import ClientConfig, CommonConfig
 from comm_utils import *
-from training_utils import train, test
+from training_utils import train, test, training_step, eval_step
 import mydatasets, mymodels
 from mpi4py import MPI
 import logging
@@ -26,6 +26,7 @@ from transformers import BertTokenizer, AutoTokenizer
 from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
 
 from numpy import mean
+from glue_utils import prepare_inputs
 
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
@@ -105,15 +106,30 @@ def main():
     common_config.weight_decay = client_config.common_config.weight_decay
     common_config.data_path = client_config.common_config.data_path
     common_config.para=client_config.para
+
+    common_config.finetune_type = client_config.common_config.finetune_type
     
     common_config.tag = 1
 
-    model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
+    pretrained_model_path = "/data/jliu/models/bert-base-uncased"
+    from mymodels import CustomBERTModel
+    num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
+    model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
     model.load_state_dict(common_config.para)
 
     model.to(device)
-    model.train()
     # TODO:according to different method, set the trainable parameters of the model
+    if common_config.finetune_type == "fedft":
+        pass
+    elif common_config.finetune_type == "fedlora":
+        pass
+    elif common_config.finetune_type == "fedadapter":
+        pass
+    elif common_config.finetune_type == "our":
+        pass
+    else:
+        raise NotImplementedError
+    logger.info(f"common_config.finetune_type --> {common_config.finetune_type}")
 
     logger.info(f"Trainable parameters info --> ")
     trainable_paras = 0
@@ -133,10 +149,15 @@ def main():
     test_dataset = client_config.test_dataset
 
     logger.info(f"len(client_config.train_data_idxes) = {len(client_config.train_data_idxes)}")
-    train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes)
-    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False)
+    from transformers import BertTokenizerFast
+    from transformers.data.data_collator import DataCollatorWithPadding
+    tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
+    data_collator = DataCollatorWithPadding(tokenizer)
+    train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes, collate_fn=data_collator)
+    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False, collate_fn=data_collator)
 
-    optimizer=torch.optim.AdamW(model.parameters(),2e-5) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
+    # TODO: optimize only the trainable parameters
+    optimizer=torch.optim.AdamW(model.parameters(),common_config.lr) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
     # batch_size = 32
     # train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
     # test_loader=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
@@ -165,49 +186,51 @@ def main():
 
 async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_train, test_loader, logger):
     ######################### Trainer: local training ############################
-    local_steps = num_train // common_config.batch_size
+    Epoch = 1
+    logger.info(f"Epoch = {Epoch}")
     logger.info(f"the number of train data: {num_train}, batch size: {common_config.batch_size}")
-    logger.info(f"local steps = {local_steps}")
     # TODO: set local step
     # Training
-    model.train()
-    loss_sum=[]
-    correct=0
-    total=0
-    for i in range(local_steps):
-        if i % (num_train / common_config.batch_size) == 0:
-            logger.info(f"################# training epoch {i} ###################")
-        label, mask, token = next(train_loader)
-        label=label.to(device)
-        mask=mask.to(device)
-        token=token.to(device)
-        pre,loss=model(label,mask,token)
-        loss_sum.append(loss.item())
-        pre=torch.argmax(pre,-1)
-        correct+=(pre==label).sum().cpu().item()
-        total+=label.shape[0]
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-    logger.info(f"training loss: {mean(loss_sum)}")
-    logger.info(f"training accuracy: {correct/total}")
-    model.eval()
-    loss_sum=[]
-    correct=0
-    total=0
-    with torch.no_grad():
-        logger.info(f"evaluation...")
-        for num, (label, mask, token) in enumerate(test_loader):
-            label = label.to(device)
-            mask = mask.to(device)
-            token = token.to(device)
-            pre, loss = model(label, mask, token)
-            loss_sum.append(loss.item())
-            pre = torch.argmax(pre, -1)
-            correct += (pre == label).sum().cpu().item()
-            total += label.shape[0]
-        logger.info(f"test loss: {mean(loss_sum)}")
-        logger.info(f"test accuracy: {str(correct / total)}")
+    for ep in range(Epoch):
+        # training
+        trange = range(len(train_loader))
+        iterator = iter(train_loader)
+        logger.info(f"################ Epoch {ep} #####################")
+        model.train()
+        loss_all=[]
+        metric_name = model.metric.name
+        metric_1_name = None if model.metric_1 is None else model.metric_1.name
+        metric_all=[]
+        metric_1_all = []
+        for step in trange:
+            inputs = prepare_inputs(next(iterator), device)
+            step_loss, step_metric, step_metric_1 = training_step(model, inputs, optimizer)
+            loss_all.append(step_loss.item())
+            metric_all.append(step_metric[model.metric.name])
+            if model.metric_1 is not None: 
+                metric_1_all.append(step_metric_1[model.metric_1.name])
+            
+        # evaluation
+        iterator = iter(test_loader)
+        trange = range(len(test_loader))
+        model.eval()
+        loss_all=[]
+        metric_name = model.metric.name
+        metric_1_name = None if model.metric_1 is None else model.metric_1.name
+        metric_all=[]
+        metric_1_all = []
+        for step in trange:
+            inputs = prepare_inputs(next(iterator), device)
+            step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
+            loss_all.append(step_loss.item())
+            metric_all.append(step_metric[model.metric.name])
+            if model.metric_1 is not None: 
+                metric_1_all.append(step_metric_1[model.metric_1.name])
+            
+        logger.info(f"test loss --> {mean(loss_all)}")
+        logger.info(f"test {metric_name} --> {mean(metric_all)} ")
+        if model.metric_1 is not None:
+            logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
     
     ######################### Maintainer: updating ###############################
     logger.info("Sending local parameters to the server")

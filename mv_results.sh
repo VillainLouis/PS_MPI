@@ -19,7 +19,7 @@ if [ ! -d "$folder_name" ]; then
     echo "mkdir $folder_name"
     mv clients "$folder_name/clients"
     mv server "$folder_name/server"
-    mv output "$folder_name/output"
+    # mv output "$folder_name/output"
     echo "mv result finished"
 else
     echo "$file_name already exists."

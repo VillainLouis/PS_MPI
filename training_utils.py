@@ -8,7 +8,83 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Any, Dict, Union
 
+
+def training_step(model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]],
+                  optimizer: torch.optim.Optimizer) -> torch.Tensor:
+    """
+    Perform a training step on a batch of inputs.
+
+    Subclass and override to inject custom behavior.
+
+    Args:
+        model (:obj:`nn.Module`):
+            The model to train.
+        inputs (:obj:`Dict[str, Union[torch.Tensor, Any]]`):
+            The inputs and targets of the model.
+        optimizer (torch.optim.Optimizer): 
+            Optimizer instance for the training loop.
+        lr_scheduler (torch.optim.lr_scheduler): 
+            LR scheduler instance for the training loop.
+
+            The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+            argument :obj:`labels`. Check your model's documentation for all accepted arguments.
+
+    Return:
+        :obj:`torch.Tensor`: The tensor with training loss on this batch.
+    """
+    loss, metric, metric_1 = compute_loss(model, inputs)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+    model.zero_grad()
+    # lr_scheduler.step()
+
+    return loss.detach(), metric, metric_1
+
+
+def eval_step(model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+    """
+    Perform a training step on a batch of inputs.
+
+    Subclass and override to inject custom behavior.
+
+    Args:
+        model (:obj:`nn.Module`):
+            The model to train.
+        inputs (:obj:`Dict[str, Union[torch.Tensor, Any]]`):
+            The inputs and targets of the model.
+        optimizer (torch.optim.Optimizer): 
+            Optimizer instance for the training loop.
+        lr_scheduler (torch.optim.lr_scheduler): 
+            LR scheduler instance for the training loop.
+
+            The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+            argument :obj:`labels`. Check your model's documentation for all accepted arguments.
+
+    Return:
+        :obj:`torch.Tensor`: The tensor with training loss on this batch.
+    """
+    model.eval()
+    model.zero_grad()
+    loss, metric, metric_1 = compute_loss(model, inputs)
+
+    return loss.detach(), metric, metric_1
+
+def compute_loss(model, inputs):
+    """
+    
+    """
+    if "labels" in inputs:
+        labels = inputs.pop("labels")
+    outputs = model(**inputs)
+
+    logits = outputs["logits"]
+    loss = model.loss(logits, labels)
+    metric, metric_1 = model.compute_metrics(predictions=logits, references=labels)
+    
+    return (loss, metric, metric_1)
 
 
 def train(model, data_loader, optimizer, local_iters=None, device=torch.device("cpu"), model_type=None):
