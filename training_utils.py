@@ -9,6 +9,78 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any, Dict, Union
+import loralib as lora
+
+def vallina_lora(model, device, rank = 8, alpha = 32):
+    ####################################################
+    target_attn_matrix = { # attn
+            "0": ["query", "key", "value", "output"],
+            "1": ["query", "key", "value", "output"],
+            "2": ["query", "key", "value", "output"],
+            "3": ["query", "key", "value", "output"],
+            "4": ["query", "key", "value", "output"],
+            "5": ["query", "key", "value", "output"],
+            "6": ["query", "key", "value", "output"],
+            "7": ["query", "key", "value", "output"],
+            "8": ["query", "key", "value", "output"],
+            "9": ["query", "key", "value", "output"],
+            "10": ["query", "key", "value", "output"],
+            "11": ["query", "key", "value", "output"]
+        }
+    target_ffn_matrix = { # ffn
+        "0": ["intermediate", "output"],
+        "1": ["intermediate", "output"],
+        "2": ["intermediate", "output"],
+        "3": ["intermediate", "output"],
+        "4": ["intermediate", "output"],
+        "5": ["intermediate", "output"],
+        "6": ["intermediate", "output"],
+        "7": ["intermediate", "output"],
+        "8": ["intermediate", "output"],
+        "9": ["intermediate", "output"],
+        "10": ["intermediate", "output"],
+        "11": ["intermediate", "output"]
+    }
+    only_lora_B = False
+    for layer in target_attn_matrix.keys():
+        for matrix in target_attn_matrix[layer]:
+            # set attention.output
+            if matrix == "output":
+                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer.to(device)
+            else:
+                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer.to(device)
+            
+
+    for layer in target_ffn_matrix.keys():
+        for matrix in target_ffn_matrix[layer]:
+            module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
+            lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+            if only_lora_B:
+                lora_layer.lora_A.requires_grad = False
+            lora_layer.weight = module.weight
+            lora_layer.bias = module.bias
+            model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer.to(device)
+
+    lora.mark_only_lora_as_trainable(model)
+
+    # 设置head可训练
+    model._modules["linear"].weight.requires_grad = True
+    model._modules["linear"].bias.requires_grad = True
+    
+    return model
+
 
 
 def training_step(model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]],

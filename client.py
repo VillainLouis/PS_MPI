@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.nn.utils import vector_to_parameters
 from config import ClientConfig, CommonConfig
 from comm_utils import *
-from training_utils import train, test, training_step, eval_step
+from training_utils import train, test, training_step, eval_step, vallina_lora
 import mydatasets, mymodels
 from mpi4py import MPI
 import logging
@@ -27,6 +27,7 @@ from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model, prepare_mode
 
 from numpy import mean
 from glue_utils import prepare_inputs
+
 
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
@@ -109,26 +110,32 @@ def main():
 
     common_config.finetune_type = client_config.common_config.finetune_type
     
+    memory = client_config.memory
+    logger.info(f"memory capacity --> {memory} GiB")
+
     common_config.tag = 1
 
     pretrained_model_path = "/data/jliu/models/bert-base-uncased"
     from mymodels import CustomBERTModel
     num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
     model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
-    model.load_state_dict(common_config.para)
 
-    model.to(device)
-    # TODO:according to different method, set the trainable parameters of the model
     if common_config.finetune_type == "fedft":
         pass
     elif common_config.finetune_type == "fedlora":
-        pass
+        model = vallina_lora(model, device,rank=128, alpha=256)
     elif common_config.finetune_type == "fedadapter":
         pass
     elif common_config.finetune_type == "our":
         pass
     else:
         raise NotImplementedError
+
+    model.load_state_dict(common_config.para)
+
+    model.to(device)
+    # TODO:according to different method, set the trainable parameters of the model
+
     logger.info(f"common_config.finetune_type --> {common_config.finetune_type}")
 
     logger.info(f"Trainable parameters info --> ")
@@ -186,46 +193,52 @@ def main():
 
 async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_train, test_loader, logger):
     ######################### Trainer: local training ############################
-    Epoch = 1
-    logger.info(f"Epoch = {Epoch}")
     logger.info(f"the number of train data: {num_train}, batch size: {common_config.batch_size}")
     # TODO: set local step
+    local_steps = int(num_train / common_config.batch_size)
+    logger.info(f"local steps --> {local_steps}")
     # Training
-    for ep in range(Epoch):
-        # training
-        trange = range(len(train_loader))
-        iterator = iter(train_loader)
-        logger.info(f"################ Epoch {ep} #####################")
-        model.train()
-        loss_all=[]
-        metric_name = model.metric.name
-        metric_1_name = None if model.metric_1 is None else model.metric_1.name
-        metric_all=[]
-        metric_1_all = []
-        for step in trange:
-            inputs = prepare_inputs(next(iterator), device)
-            step_loss, step_metric, step_metric_1 = training_step(model, inputs, optimizer)
-            loss_all.append(step_loss.item())
-            metric_all.append(step_metric[model.metric.name])
-            if model.metric_1 is not None: 
-                metric_1_all.append(step_metric_1[model.metric_1.name])
-            
-        # evaluation
-        iterator = iter(test_loader)
-        trange = range(len(test_loader))
-        model.eval()
-        loss_all=[]
-        metric_name = model.metric.name
-        metric_1_name = None if model.metric_1 is None else model.metric_1.name
-        metric_all=[]
-        metric_1_all = []
-        for step in trange:
-            inputs = prepare_inputs(next(iterator), device)
-            step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
-            loss_all.append(step_loss.item())
-            metric_all.append(step_metric[model.metric.name])
-            if model.metric_1 is not None: 
-                metric_1_all.append(step_metric_1[model.metric_1.name])
+    iterator = iter(train_loader)
+    model.train()
+    loss_all=[]
+    metric_name = model.metric.name
+    metric_1_name = None if model.metric_1 is None else model.metric_1.name
+    metric_all=[]
+    metric_1_all = []
+    for step in range(local_steps):
+        try:
+            next_data = next(iterator)
+        except StopIteration:
+            iterator = iter(train_loader)
+            next_data = next(iterator)
+        inputs = prepare_inputs(next_data, device)
+        step_loss, step_metric, step_metric_1 = training_step(model, inputs, optimizer)
+        loss_all.append(step_loss.item())
+        metric_all.append(step_metric[model.metric.name])
+        if model.metric_1 is not None: 
+            metric_1_all.append(step_metric_1[model.metric_1.name])
+
+    logger.info(f"train loss --> {mean(loss_all)}")
+    logger.info(f"train {metric_name} --> {mean(metric_all)} ")
+    if model.metric_1 is not None:
+        logger.info(f"train {metric_1_name} -->  {mean(metric_1_all)}")
+        
+    # evaluation
+    iterator = iter(test_loader)
+    trange = range(len(test_loader))
+    model.eval()
+    loss_all=[]
+    metric_name = model.metric.name
+    metric_1_name = None if model.metric_1 is None else model.metric_1.name
+    metric_all=[]
+    metric_1_all = []
+    for step in trange:
+        inputs = prepare_inputs(next(iterator), device)
+        step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
+        loss_all.append(step_loss.item())
+        metric_all.append(step_metric[model.metric.name])
+        if model.metric_1 is not None: 
+            metric_1_all.append(step_metric_1[model.metric_1.name])
             
         logger.info(f"test loss --> {mean(loss_all)}")
         logger.info(f"test {metric_name} --> {mean(metric_all)} ")

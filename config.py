@@ -68,6 +68,9 @@ class ClientConfig:
         self.neighbor_paras=None
         self.neighbor_indices=None
 
+        # resource
+        self.memory=None
+
 
 class BertForMRCConfig(object):
     def __init__(self):

@@ -10,7 +10,7 @@ from config import *
 import torch.nn.functional as F
 import mydatasets
 import mymodels
-from training_utils import test, eval_step
+from training_utils import test, eval_step, vallina_lora
 
 from mpi4py import MPI
 
@@ -24,9 +24,9 @@ from glue_utils import prepare_inputs
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--dataset_type', type=str, default='sst2')
 parser.add_argument('--model_type', type=str, default='Bert')
-parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--batch_size', type=int, default=8)
 parser.add_argument('--data_pattern', type=int, default=0)
-parser.add_argument('--lr', type=float, default=1e-5)
+parser.add_argument('--lr', type=float, default=2e-5)
 parser.add_argument('--decay_rate', type=float, default=0.99)
 parser.add_argument('--min_lr', type=float, default=0.001)
 parser.add_argument('--epoch', type=int, default=50)
@@ -101,6 +101,17 @@ def main():
     logger.info(f"\nLoading pre-trained BERT model \"{pretrained_model_path}\"")
     num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
     global_model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
+
+    if common_config.finetune_type == "fedft":
+        pass
+    elif common_config.finetune_type == "fedlora":
+        global_model = vallina_lora(global_model, device,rank=128, alpha=256)
+    elif common_config.finetune_type == "fedadapter":
+        pass
+    elif common_config.finetune_type == "our":
+        pass
+    else:
+        raise NotImplementedError
     
     
     # global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
@@ -159,6 +170,16 @@ def main():
     
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
+    # memory heterogeneity
+    memory_size = [2, 4, 6, 8, 12] 
+    memory_prop = [0.1, 0.3, 0.3, 0.2, 0.1]  
+
+    client_memory = np.random.choice(
+        memory_size,
+        size=worker_num, 
+        p=memory_prop  
+    )
+
     for worker_idx, worker in enumerate(worker_list):
         worker.config.para = global_model.state_dict()
         if args.data_pattern != 0:
@@ -167,6 +188,7 @@ def main():
             worker.config.train_data_idxes = train_data_partition.use(worker_idx)
         worker.config.source_train_dataset = train_dataset
         worker.config.test_dataset = test_dataset
+        worker.config.memory = client_memory[worker_idx]
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     
     ###################### Sending init config to clients ###############################
