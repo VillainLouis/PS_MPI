@@ -10,7 +10,7 @@ from config import *
 import torch.nn.functional as F
 import mydatasets
 import mymodels
-from training_utils import test, eval_step, vallina_lora, add_adapter
+from training_utils import test, eval_step, vallina_lora, add_adapter, customized_lora
 
 from mpi4py import MPI
 
@@ -115,7 +115,7 @@ def main():
     elif common_config.finetune_type == "fedadapter":
         global_model = add_adapter(global_model, width=32, depth=12)
     elif common_config.finetune_type == "our":
-        pass
+        global_model = customized_lora(global_model,192, memory=100)
     else:
         raise NotImplementedError
     
