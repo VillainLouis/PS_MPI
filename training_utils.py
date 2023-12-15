@@ -11,6 +11,48 @@ import torch.nn.functional as F
 from typing import Any, Dict, Union
 import loralib as lora
 
+def add_adapter(model, width = 32, depth = 12):
+    def make_only_adapter_trainable(model):
+        for layer, para in model.named_parameters():
+            if "adapter" in layer:
+                para.requires_grad = True
+            else:
+                para.requires_grad = False
+
+    from torch import nn
+    class Adapter(nn.Module):
+        def __init__(self, input_dim, bottleneck_dim):
+            super().__init__()
+            self.down_project = nn.Linear(input_dim, bottleneck_dim, bias=False) 
+            self.activation = nn.ReLU()  
+            self.up_project = nn.Linear(bottleneck_dim, input_dim, bias=False)
+            
+        def forward(self, x):
+            x = self.down_project(x) 
+            x = self.activation(x)
+            x = self.up_project(x)
+            return x
+        
+    layers = [str(l) for l in range(11, 11 - depth, -1)]
+    for layer in layers:
+        origin_layer = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["output"]._modules["LayerNorm"]
+        from torch.nn import Sequential
+        import copy
+        new_layer = Sequential()
+        new_layer.add_module(layer, copy.deepcopy(origin_layer))
+        adapter = Adapter(input_dim=768, bottleneck_dim=width)
+        new_layer.add_module('adapter', adapter)
+
+        model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["output"]._modules["LayerNorm"] = new_layer
+
+    make_only_adapter_trainable(model)
+    # 设置head可训练
+    model._modules["linear"].weight.requires_grad = True
+    model._modules["linear"].bias.requires_grad = True
+
+    return model
+
+
 def vallina_lora(model, device, rank = 8, alpha = 32):
     ####################################################
     target_attn_matrix = { # attn

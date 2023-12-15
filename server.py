@@ -10,7 +10,7 @@ from config import *
 import torch.nn.functional as F
 import mydatasets
 import mymodels
-from training_utils import test, eval_step, vallina_lora
+from training_utils import test, eval_step, vallina_lora, add_adapter
 
 from mpi4py import MPI
 
@@ -24,9 +24,9 @@ from glue_utils import prepare_inputs
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--dataset_type', type=str, default='sst2')
 parser.add_argument('--model_type', type=str, default='Bert')
-parser.add_argument('--batch_size', type=int, default=8)
+parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--data_pattern', type=int, default=0)
-parser.add_argument('--lr', type=float, default=2e-5)
+parser.add_argument('--lr', type=float, default=1e-5)
 parser.add_argument('--decay_rate', type=float, default=0.99)
 parser.add_argument('--min_lr', type=float, default=0.001)
 parser.add_argument('--epoch', type=int, default=50)
@@ -36,6 +36,8 @@ parser.add_argument('--data_path', type=str, default='/data/jliu/data')
 parser.add_argument('--use_cuda', action="store_false", default=True)
 parser.add_argument('--alpha', type=float, default=1.0)
 parser.add_argument('--seed', type=int, default=42)
+
+parser.add_argument('--fedlora_rank', type=int, default=4)
 
 parser.add_argument('--finetune_type', type=str, choices=["fedft", "fedlora", "fedadapter", "our"])
 
@@ -88,6 +90,7 @@ def main():
     common_config.weight_decay = args.weight_decay
 
     common_config.finetune_type = args.finetune_type
+    common_config.fedlora_rank = args.fedlora_rank
 
     worker_num = int(csize)-1
 
@@ -102,12 +105,15 @@ def main():
     num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
     global_model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
 
+    
+    logger.info(f"strategy --> {common_config.finetune_type}")
     if common_config.finetune_type == "fedft":
         pass
     elif common_config.finetune_type == "fedlora":
-        global_model = vallina_lora(global_model, device,rank=128, alpha=256)
+        logger.info(f"fedlora_rank --> {args.fedlora_rank}")
+        global_model = vallina_lora(global_model, device,rank=args.fedlora_rank, alpha=args.fedlora_rank * 2)
     elif common_config.finetune_type == "fedadapter":
-        pass
+        global_model = add_adapter(global_model, width=32, depth=12)
     elif common_config.finetune_type == "our":
         pass
     else:
@@ -251,6 +257,7 @@ def parameter_wise_aggregation(worker_list):
                     overall_para[layer]['value'] += paras
     aggregate_para_dict = dict()
     for layer in overall_para.keys():
+        logger.info(f"{layer} --> {overall_para[layer]['cnt']}")
         aggregate_para_dict[layer] = overall_para[layer]['value'] / overall_para[layer]['cnt']
     return aggregate_para_dict
 

@@ -45,6 +45,7 @@ class CommonConfig:
         # self.bert_mrc_config = BertForMRCConfig()
         # self.lora_layers = []
         self.finetune_type = None
+        self.fedlora_rank = None
 
 class ClientConfig:
     def __init__(self,

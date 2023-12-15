@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.nn.utils import vector_to_parameters
 from config import ClientConfig, CommonConfig
 from comm_utils import *
-from training_utils import train, test, training_step, eval_step, vallina_lora
+from training_utils import train, test, training_step, eval_step, vallina_lora, add_adapter
 import mydatasets, mymodels
 from mpi4py import MPI
 import logging
@@ -107,6 +107,7 @@ def main():
     common_config.weight_decay = client_config.common_config.weight_decay
     common_config.data_path = client_config.common_config.data_path
     common_config.para=client_config.para
+    common_config.fedlora_rank = client_config.common_config.fedlora_rank
 
     common_config.finetune_type = client_config.common_config.finetune_type
     
@@ -123,9 +124,9 @@ def main():
     if common_config.finetune_type == "fedft":
         pass
     elif common_config.finetune_type == "fedlora":
-        model = vallina_lora(model, device,rank=128, alpha=256)
+        model = vallina_lora(model, device,rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2)
     elif common_config.finetune_type == "fedadapter":
-        pass
+        model = add_adapter(model, width=32, depth=12)
     elif common_config.finetune_type == "our":
         pass
     else:
