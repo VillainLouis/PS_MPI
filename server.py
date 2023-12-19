@@ -20,6 +20,8 @@ import random
 from noniid_label import label_skew_process
 from glue_utils import prepare_inputs
 
+import math
+
 #init parameters
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--dataset_type', type=str, default='sst2')
@@ -39,7 +41,17 @@ parser.add_argument('--seed', type=int, default=42)
 
 parser.add_argument('--fedlora_rank', type=int, default=4)
 
-parser.add_argument('--finetune_type', type=str, choices=["fedft", "fedlora", "fedadapter", "our"])
+parser.add_argument('--finetune_type', type=str, choices=["fedft", "fedlora", "fedadapter", "our", "heterlora"])
+
+parser.add_argument("--max_rank", type=int, default=64)
+parser.add_argument("--min_rank", type=int, default=2)
+
+
+parser.add_argument("--our_total_rank", type=int, default=192)
+
+parser.add_argument("--fedadpter_width", type=int, default=32)
+parser.add_argument("--fedadpter_depth", type=int, default=12)
+parser.add_argument("--partitial_data", type=float, default=1.0)
 
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
@@ -51,6 +63,9 @@ csize = comm.Get_size()
 
 np.random.seed(args.seed)
 random.seed(args.seed)
+
+torch.manual_seed(args.seed)
+
 
 alpha = args.alpha
 device = f"cuda:{rank % torch.cuda.device_count()}"
@@ -92,10 +107,16 @@ def main():
     common_config.finetune_type = args.finetune_type
     common_config.fedlora_rank = args.fedlora_rank
 
+    common_config.heterlora_max_rank = args.max_rank
+    common_config.heterlora_min_rank = args.min_rank
+    common_config.our_total_rank = args.our_total_rank
+    common_config.fedadpter_width = args.fedadpter_width
+    common_config.fedadpter_depth = args.fedadpter_depth
     worker_num = int(csize)-1
 
+    logger.info(f"learning rate: {common_config.lr}")
     ###################################### init config #############################################
-    pretrained_model_path = "/data/jliu/models/bert-base-uncased"
+    pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
 
     ###################################### init model ###############################################
     # from mymodels import SST
@@ -113,9 +134,22 @@ def main():
         logger.info(f"fedlora_rank --> {args.fedlora_rank}")
         global_model = vallina_lora(global_model, device,rank=args.fedlora_rank, alpha=args.fedlora_rank * 2)
     elif common_config.finetune_type == "fedadapter":
-        global_model = add_adapter(global_model, width=32, depth=12)
+        logger.info(f"common_config.fedadpter_width = {common_config.fedadpter_width}, common_config.fedadpter_depth = {common_config.fedadpter_depth}")
+        global_model = add_adapter(global_model, width=common_config.fedadpter_width, depth=common_config.fedadpter_depth)
     elif common_config.finetune_type == "our":
-        global_model = customized_lora(global_model,192, memory=100)
+        logger.info(f"common_config.our_total_rank = {common_config.our_total_rank}")
+        global_model = customized_lora(global_model,common_config.our_total_rank, memory=100)
+    elif common_config.finetune_type == "heterlora":
+        logger.info(f"heterlora_rank --> max: {common_config.heterlora_max_rank} min: {common_config.heterlora_min_rank}")
+        global_model = vallina_lora(global_model, device,rank=common_config.heterlora_max_rank, alpha=common_config.heterlora_max_rank * 2)
+        max_num = common_config.heterlora_max_rank
+        min_num = common_config.heterlora_min_rank
+        powers_of_two = []  
+        max_power = int(math.log2(max_num)) + 1
+        for i in range(max_power):
+            n = 2 ** (i+1) 
+            if n >= min_num and n <= max_num:
+                powers_of_two.append(n)
     else:
         raise NotImplementedError
     
@@ -137,10 +171,13 @@ def main():
     ###################################### init server side dataset (train, test) and set data partition ####################################
     from mydatasets import RandomPartitioner
     # train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
+    partitial_data = args.partitial_data
     if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli"]:
         from mydatasets import get_glue_dataset
         train_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "train", batch_size=common_config.batch_size)
         test_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "validation", batch_size=common_config.batch_size)
+        from torch.utils.data import Subset
+        train_dataset = Subset(train_dataset, range(int(partitial_data * len(train_dataset))))
         from transformers import BertTokenizerFast
         from transformers.data.data_collator import DataCollatorWithPadding
         tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
@@ -168,6 +205,7 @@ def main():
                 for idx in range(len(train_dataset))
             ])
             train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         else:
             raise NotImplementedError
     else:
@@ -185,7 +223,8 @@ def main():
         size=worker_num, 
         p=memory_prop  
     )
-
+    client_memory = [ 4, 12,  8,  6 , 4 , 4 , 2,  8 , 6 , 8  ,2, 12,  8 , 4  ,4,  4,  4 , 6  ,6,  4]
+    logger.info(f"client_memory --> {client_memory}")
     for worker_idx, worker in enumerate(worker_list):
         worker.config.para = global_model.state_dict()
         if args.data_pattern != 0:
@@ -195,6 +234,8 @@ def main():
         worker.config.source_train_dataset = train_dataset
         worker.config.test_dataset = test_dataset
         worker.config.memory = client_memory[worker_idx]
+        if common_config.finetune_type == "heterlora":
+            worker.config.heterlora_client_rank = random.choice(powers_of_two)
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     
     ###################### Sending init config to clients ###############################
@@ -207,10 +248,13 @@ def main():
         communication_parallel(worker_list, epoch_idx, comm, action="get_para")
         logger.info("Clients' information received.")
         logger.info("Performing aggregation...")
-        global_para = parameter_wise_aggregation(worker_list)
+        global_para = parameter_wise_aggregation(worker_list, common_config)
         logger.info("Aggregation finished and sending the newly aggregated paras back to clients")
         communication_parallel(worker_list, epoch_idx, comm, action="send_model",data=global_para)
         logger.info(f"TEST on server...")
+        # logger.info("The aggregated model is: ")
+        # for layer, paras in global_model.named_parameters():
+        #     logger.info(f"\t{layer} --> {paras}")
         global_model_sd = global_model.state_dict()
         global_model_sd.update(global_para)
         global_model.load_state_dict(global_model_sd)
@@ -243,22 +287,34 @@ def main():
 
     # close socket
     
-def parameter_wise_aggregation(worker_list):
+def parameter_wise_aggregation(worker_list, common_config: CommonConfig):
     overall_para = dict()
+    lora_selected_clients_num = 10
     with torch.no_grad():
+        logger.info("aggregate paras at server side...")
         for worker_idx in range(len(worker_list)):
+            # logger.info(f"\t From client {worker_idx}")
             for layer, paras in worker_list[worker_idx].config.neighbor_paras.items():
+                # logger.info(f"\t\t {layer} --> {paras}")
                 if layer not in overall_para:
                     overall_para[layer] = dict()
                     overall_para[layer]['cnt'] = 1
                     overall_para[layer]['value'] = paras
                 else:
-                    overall_para[layer]['cnt'] += 1
-                    overall_para[layer]['value'] += paras
+                    if common_config.finetune_type == "our":
+                        if overall_para[layer]['cnt'] <= lora_selected_clients_num:
+                            overall_para[layer]['cnt'] += 1
+                            overall_para[layer]['value'] += paras
+                        else:
+                            continue
+                    else:
+                        overall_para[layer]['cnt'] += 1
+                        overall_para[layer]['value'] += paras
     aggregate_para_dict = dict()
     for layer in overall_para.keys():
-        logger.info(f"{layer} --> {overall_para[layer]['cnt']}")
+        # logger.info(f"{layer} --> {overall_para[layer]['cnt']} --> {overall_para[layer]['value']}")
         aggregate_para_dict[layer] = overall_para[layer]['value'] / overall_para[layer]['cnt']
+        # logger.info(f"{layer} after aggregated --> {aggregate_para_dict[layer]}")
     return aggregate_para_dict
 
 def aggregate_para_dict(worker_list):

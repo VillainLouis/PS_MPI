@@ -111,20 +111,29 @@ def main():
     common_config.fedlora_rank = client_config.common_config.fedlora_rank
 
     common_config.finetune_type = client_config.common_config.finetune_type
-    
+
+    common_config.heterlora_max_rank = client_config.common_config.heterlora_max_rank
+    common_config.heterlora_min_rank = client_config.common_config.heterlora_min_rank
+
+    common_config.client_rank = client_config.heterlora_client_rank
+    common_config.our_total_rank = client_config.common_config.our_total_rank
+
+    common_config.fedadpter_width = client_config.common_config.fedadpter_width
+    common_config.fedadpter_depth = client_config.common_config.fedadpter_depth
+
     memory = client_config.memory
     logger.info(f"memory capacity --> {memory} GiB")
 
     common_config.tag = 1
 
-    pretrained_model_path = "/data/jliu/models/bert-base-uncased"
+    pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
     from mymodels import CustomBERTModel
     num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
     model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
 
     trainable = True
     if common_config.finetune_type == "fedft":
-        if memory <= 12:
+        if memory < 12:
             # untrainable
             trainable = False
     elif common_config.finetune_type == "fedlora":
@@ -133,18 +142,36 @@ def main():
             # untrainable
             trainable = False
     elif common_config.finetune_type == "fedadapter":
-        model = add_adapter(model, width=32, depth=12)
+        model = add_adapter(model, width=common_config.fedadpter_width, depth=common_config.fedadpter_depth)
         if memory < 6:
             # untrainable
             trainable = False
     elif common_config.finetune_type == "our":
-        model = customized_lora(model,192, memory)
-        
+        model = customized_lora(model,common_config.our_total_rank, memory)
+    elif common_config.finetune_type == "heterlora":
+        logger.info(f"clint's heterlora_rank --> {common_config.client_rank}")
+        model = vallina_lora(model, device,rank=common_config.client_rank, alpha=common_config.client_rank * 2)
+        if memory < 8:
+            # untrainable
+            trainable = False
     else:
         raise NotImplementedError
     
     
     logger.info(f"Is this client trainable? --> {trainable}")
+
+    # heterlora truncate
+    if common_config.finetune_type == "heterlora":
+        logger.info("truncate tensors")
+        for layer, paras in common_config.para.items():
+            if "lora_A" in layer:
+                # logger.info(f"before truncate {layer}, shape = {paras.shape}")
+                common_config.para[layer] = paras[:common_config.client_rank, :]
+                # logger.info(f"after truncate {layer}, shape = {paras.shape}")
+            if "lora_B" in layer:
+                # logger.info(f"before truncate {layer}, shape = {paras.shape}")
+                common_config.para[layer] = paras[:, : common_config.client_rank]
+                # logger.info(f"after truncate {layer}, shape = {paras.shape}")
 
     model.load_state_dict(common_config.para)
 
@@ -179,7 +206,7 @@ def main():
     test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False, collate_fn=data_collator)
 
     # TODO: optimize only the trainable parameters
-    optimizer=torch.optim.AdamW(model.parameters(),common_config.lr) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
+    optimizer=torch.optim.SGD(model.parameters(),common_config.lr) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
     # batch_size = 32
     # train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
     # test_loader=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
@@ -206,9 +233,35 @@ def main():
         if common_config.tag==common_config.epoch+1:
             break
 
-async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_train, test_loader, logger, trainable, memory):
+async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train_loader, num_train, test_loader, logger, trainable, memory):
     ######################### Trainer: local training ############################
     logger.info(f"the number of train data: {num_train}, batch size: {common_config.batch_size}")
+
+    ######### evaluation before training #########
+    # evaluation
+    logger.info("evaluation before training")
+    iterator = iter(test_loader)
+    trange = range(len(test_loader))
+    model.eval()
+    loss_all=[]
+    metric_name = model.metric.name
+    metric_1_name = None if model.metric_1 is None else model.metric_1.name
+    metric_all=[]
+    metric_1_all = []
+    for step in trange:
+        inputs = prepare_inputs(next(iterator), device)
+        step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
+        loss_all.append(step_loss.item())
+        metric_all.append(step_metric[model.metric.name])
+        if model.metric_1 is not None: 
+            metric_1_all.append(step_metric_1[model.metric_1.name])
+            
+    logger.info(f"test loss --> {mean(loss_all)}")
+    logger.info(f"test {metric_name} --> {mean(metric_all)} ")
+    if model.metric_1 is not None:
+        logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
+
+    ##########################
     if trainable:
         # TODO: set local step
         local_steps = int(num_train / common_config.batch_size)
@@ -234,10 +287,10 @@ async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_t
             if model.metric_1 is not None: 
                 metric_1_all.append(step_metric_1[model.metric_1.name])
 
-        logger.info(f"train loss --> {mean(loss_all)}")
-        logger.info(f"train {metric_name} --> {mean(metric_all)} ")
-        if model.metric_1 is not None:
-            logger.info(f"train {metric_1_name} -->  {mean(metric_1_all)}")
+        # logger.info(f"train loss --> {mean(loss_all)}")
+        # logger.info(f"train {metric_name} --> {mean(metric_all)} ")
+        # if model.metric_1 is not None:
+        #     logger.info(f"train {metric_1_name} -->  {mean(metric_1_all)}")
             
         # evaluation
         iterator = iter(test_loader)
@@ -256,10 +309,10 @@ async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_t
             if model.metric_1 is not None: 
                 metric_1_all.append(step_metric_1[model.metric_1.name])
                 
-            logger.info(f"test loss --> {mean(loss_all)}")
-            logger.info(f"test {metric_name} --> {mean(metric_all)} ")
-            if model.metric_1 is not None:
-                logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
+        logger.info(f"test loss --> {mean(loss_all)}")
+        logger.info(f"test {metric_name} --> {mean(metric_all)} ")
+        if model.metric_1 is not None:
+            logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
         
         ######################### Maintainer: updating ###############################
         logger.info("Sending local parameters to the server")
@@ -268,11 +321,26 @@ async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_t
         # 发送所有可以训练的参数
         trainable_paras = 0
         all_paras = 0
+        logger.info("Uploading local paras to server...")
         for layer, paras in model.named_parameters():
             all_paras += paras.numel()
             if paras.requires_grad:
+                # logger.info(f"\t{layer} --> {paras}")
                 local_paras[layer] = paras.clone().detach().to("cpu") # 都移动到cpu上方便聚合
+                if common_config.finetune_type == "heterlora":
+                    # padding 0
+                    if "lora_A" in layer:
+                        from torch.nn import functional as F
+                        # logger.info(f"local_paras[layer] shape = {local_paras[layer].shape}")
+                        padded_t = F.pad(local_paras[layer], (0,0,0,common_config.heterlora_max_rank-common_config.client_rank), value=0)  
+                        local_paras[layer] = padded_t
+                    if "lora_B" in layer:
+                        padded_t = F.pad(local_paras[layer], (0, common_config.heterlora_max_rank-common_config.client_rank), value=0)
+                        local_paras[layer] = padded_t
                 trainable_paras += paras.numel()
+        # logger.info("uploading dict --> ")
+        # for layer, para in local_paras.items():
+        #     logger.info(f"layer {layer}, shape = {para.shape}")
         
         await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=common_config.tag)
         logger.info("Waiting and Receiving aggregated paras from the server...")
@@ -280,10 +348,23 @@ async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_t
         logger.info("Updating local model with the received paras...")
         model_state_dict = model.state_dict()
         # update paras
+            ## heterlora truncate
+        if common_config.finetune_type == "heterlora":
+            for layer, paras in received_paras.items():
+                if "lora_A" in layer:
+                    received_paras[layer] = paras[:common_config.client_rank, :]
+                if "lora_B" in layer:
+                    received_paras[layer] = paras[:, : common_config.client_rank]
+
+        logger.info(f"recevied paras from server...")
         for layer, paras in received_paras.items():
+            # logger.info(f"\t{layer} --> paras")
             model_state_dict[layer] = paras.to(device)
         # according to the resource constraint, update trainable paras
         set_trainble_para(model, memory)
+        # logger.info("local model after updating: ")
+        # for layer, paras in model.named_parameters():
+        #     logger.info(f"\t{layer} --> {paras}")
     
     else:
         logger.info("Sending empty parameters to the server")
@@ -294,6 +375,14 @@ async def ada_lora_fl(comm, common_config, model, optimizer, train_loader, num_t
         logger.info("Updating local model with the received paras...")
         model_state_dict = model.state_dict()
         # update paras
+            ## heterlora truncate
+        if common_config.finetune_type == "heterlora":
+            for layer, paras in received_paras.items():
+                if "lora_A" in layer:
+                    received_paras[layer] = paras[:common_config.client_rank, :]
+                if "lora_B" in layer:
+                    received_paras[layer] = paras[:, : common_config.client_rank]
+
         for layer, paras in received_paras.items():
             model_state_dict[layer] = paras.to(device)
     

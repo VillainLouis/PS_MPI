@@ -46,7 +46,13 @@ class CommonConfig:
         # self.lora_layers = []
         self.finetune_type = None
         self.fedlora_rank = None
+        self.heterlora_max_rank = None
+        self.heterlora_min_rank = None
+        self.client_rank = None
 
+        self.our_total_rank = None
+        self.fedadpter_width = None
+        self.fedadpter_depth = None
 class ClientConfig:
     def __init__(self,
                 common_config,
@@ -72,6 +78,8 @@ class ClientConfig:
         # resource
         self.memory=None
 
+        # heterlora
+        self.heterlora_client_rank = None
 
 class BertForMRCConfig(object):
     def __init__(self):
