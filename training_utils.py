@@ -155,39 +155,25 @@ def add_adapter(model, width = 32, depth = 12):
     return model
 
 
-def vallina_lora(model, device, rank = 8, alpha = 32):
+def vallina_lora(model, depth = 12, rank = 8, alpha = 32):
     ####################################################
-    target_attn_matrix = { # attn
-            "0": ["query", "key", "value", "output"],
-            "1": ["query", "key", "value", "output"],
-            "2": ["query", "key", "value", "output"],
-            "3": ["query", "key", "value", "output"],
-            "4": ["query", "key", "value", "output"],
-            "5": ["query", "key", "value", "output"],
-            "6": ["query", "key", "value", "output"],
-            "7": ["query", "key", "value", "output"],
-            "8": ["query", "key", "value", "output"],
-            "9": ["query", "key", "value", "output"],
-            "10": ["query", "key", "value", "output"],
-            "11": ["query", "key", "value", "output"]
-        }
-    target_ffn_matrix = { # ffn
-        "0": ["intermediate", "output"],
-        "1": ["intermediate", "output"],
-        "2": ["intermediate", "output"],
-        "3": ["intermediate", "output"],
-        "4": ["intermediate", "output"],
-        "5": ["intermediate", "output"],
-        "6": ["intermediate", "output"],
-        "7": ["intermediate", "output"],
-        "8": ["intermediate", "output"],
-        "9": ["intermediate", "output"],
-        "10": ["intermediate", "output"],
-        "11": ["intermediate", "output"]
-    }
+    ranks = [rank for _ in range(depth)]
+    # print(f"ranks --> {ranks}")
+    layer_rank = dict()
+    target_attn_matrix = dict()
+    target_ffn_matrix = dict()
+
+    last_layer_idx = 11
+    for idx, r in enumerate(ranks):
+        layer_rank[str(last_layer_idx - idx)] = r
+        target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
+        target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+
     only_lora_B = False
     for layer in target_attn_matrix.keys():
         for matrix in target_attn_matrix[layer]:
+            rank = layer_rank[layer]
+            alpha = 2 * rank
             # set attention.output
             if matrix == "output":
                 module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
@@ -196,7 +182,7 @@ def vallina_lora(model, device, rank = 8, alpha = 32):
                     lora_layer.lora_A.requires_grad = False
                 lora_layer.weight = module.weight
                 lora_layer.bias = module.bias
-                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer.to(device)
+                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
             else:
                 module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
                 lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
@@ -204,19 +190,19 @@ def vallina_lora(model, device, rank = 8, alpha = 32):
                     lora_layer.lora_A.requires_grad = False
                 lora_layer.weight = module.weight
                 lora_layer.bias = module.bias
-                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer.to(device)
+                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
             
 
     for layer in target_ffn_matrix.keys():
         for matrix in target_ffn_matrix[layer]:
+            rank = layer_rank[layer]
             module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
             lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
             if only_lora_B:
                 lora_layer.lora_A.requires_grad = False
             lora_layer.weight = module.weight
             lora_layer.bias = module.bias
-            model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer.to(device)
-
+            model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
     lora.mark_only_lora_as_trainable(model)
 
     # 设置head可训练

@@ -40,6 +40,7 @@ parser.add_argument('--alpha', type=float, default=1.0)
 parser.add_argument('--seed', type=int, default=42)
 
 parser.add_argument('--fedlora_rank', type=int, default=4)
+parser.add_argument('--fedlora_depth', type=int, default=12)
 
 parser.add_argument('--finetune_type', type=str, choices=["fedft", "fedlora", "fedadapter", "our", "heterlora"])
 
@@ -51,7 +52,10 @@ parser.add_argument("--our_total_rank", type=int, default=192)
 
 parser.add_argument("--fedadpter_width", type=int, default=32)
 parser.add_argument("--fedadpter_depth", type=int, default=12)
+
 parser.add_argument("--partitial_data", type=float, default=1.0)
+
+parser.add_argument("--enable_sys_heter", type=bool, default=False)
 
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
@@ -106,12 +110,16 @@ def main():
 
     common_config.finetune_type = args.finetune_type
     common_config.fedlora_rank = args.fedlora_rank
+    common_config.fedlora_depth = args.fedlora_depth
 
     common_config.heterlora_max_rank = args.max_rank
     common_config.heterlora_min_rank = args.min_rank
     common_config.our_total_rank = args.our_total_rank
     common_config.fedadpter_width = args.fedadpter_width
     common_config.fedadpter_depth = args.fedadpter_depth
+    common_config.enable_sys_heter = args.enable_sys_heter
+    logger.info(f"system heter is enable ? --> {common_config.enable_sys_heter}")
+    logger.info(f"data hetero is enable ? --> {common_config.data_pattern == 1}")
     worker_num = int(csize)-1
 
     logger.info(f"learning rate: {common_config.lr}")
@@ -131,8 +139,8 @@ def main():
     if common_config.finetune_type == "fedft":
         pass
     elif common_config.finetune_type == "fedlora":
-        logger.info(f"fedlora_rank --> {args.fedlora_rank}")
-        global_model = vallina_lora(global_model, device,rank=args.fedlora_rank, alpha=args.fedlora_rank * 2)
+        logger.info(f"fedlora_rank --> {args.fedlora_rank} fedlora_depth --> {common_config.fedlora_depth}")
+        global_model = vallina_lora(global_model, depth=common_config.fedlora_depth, rank=args.fedlora_rank, alpha=args.fedlora_rank * 2)
     elif common_config.finetune_type == "fedadapter":
         logger.info(f"common_config.fedadpter_width = {common_config.fedadpter_width}, common_config.fedadpter_depth = {common_config.fedadpter_depth}")
         global_model = add_adapter(global_model, width=common_config.fedadpter_width, depth=common_config.fedadpter_depth)
@@ -172,6 +180,7 @@ def main():
     from mydatasets import RandomPartitioner
     # train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
     partitial_data = args.partitial_data
+    logger.info(f"totoal dataset: {partitial_data * 100}% {common_config.dataset_type}")
     if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli"]:
         from mydatasets import get_glue_dataset
         train_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "train", batch_size=common_config.batch_size)
@@ -242,6 +251,7 @@ def main():
     logger.info(f"Sending init config to all clients and start the training procedure")
     communication_parallel(worker_list, 1, comm, action="init")
 
+    max_acc = 0.0
     for epoch_idx in range(1, 1+common_config.epoch):
         logger.info(f"################## Round {epoch_idx} begin #####################")
         logger.info("Waiting and receiving updated paras from clients")
@@ -280,10 +290,13 @@ def main():
                 
             logger.info(f"test loss --> {mean(loss_all)}")
             logger.info(f"test {metric_name} --> {mean(metric_all)} ")
+            max_acc = max(max_acc, mean(metric_all))
             if global_model.metric_1 is not None:
                 logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
 
         logger.info(f"Round {epoch_idx} finished")
+    
+    logger.info(f"max_acc --> {max_acc}")
 
     # close socket
     

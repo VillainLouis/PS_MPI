@@ -101,6 +101,7 @@ def main():
     common_config.batch_size = client_config.common_config.batch_size
     common_config.data_pattern=client_config.common_config.data_pattern
     common_config.lr = client_config.common_config.lr
+    logger.info(f"common_config.lr --> {common_config.lr}")
     common_config.decay_rate = client_config.common_config.decay_rate
     common_config.min_lr=client_config.common_config.min_lr
     common_config.epoch = client_config.common_config.epoch
@@ -109,6 +110,7 @@ def main():
     common_config.data_path = client_config.common_config.data_path
     common_config.para=client_config.para
     common_config.fedlora_rank = client_config.common_config.fedlora_rank
+    common_config.fedlora_depth = client_config.common_config.fedlora_depth
 
     common_config.finetune_type = client_config.common_config.finetune_type
 
@@ -121,6 +123,8 @@ def main():
     common_config.fedadpter_width = client_config.common_config.fedadpter_width
     common_config.fedadpter_depth = client_config.common_config.fedadpter_depth
 
+    common_config.enable_sys_heter = client_config.common_config.enable_sys_heter
+
     memory = client_config.memory
     logger.info(f"memory capacity --> {memory} GiB")
 
@@ -132,18 +136,19 @@ def main():
     model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
 
     trainable = True
+    logger.info(f"common_config.enable_sys_heter --> {common_config.enable_sys_heter}")
     if common_config.finetune_type == "fedft":
-        if memory < 12:
+        if common_config.enable_sys_heter and memory < 12:
             # untrainable
             trainable = False
     elif common_config.finetune_type == "fedlora":
-        model = vallina_lora(model, device,rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2)
-        if memory < 8:
+        model = vallina_lora(model, depth=common_config.fedlora_depth, rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2)
+        if common_config.enable_sys_heter and memory < 8:
             # untrainable
             trainable = False
     elif common_config.finetune_type == "fedadapter":
         model = add_adapter(model, width=common_config.fedadpter_width, depth=common_config.fedadpter_depth)
-        if memory < 6:
+        if common_config.enable_sys_heter and memory < 6:
             # untrainable
             trainable = False
     elif common_config.finetune_type == "our":
@@ -151,7 +156,7 @@ def main():
     elif common_config.finetune_type == "heterlora":
         logger.info(f"clint's heterlora_rank --> {common_config.client_rank}")
         model = vallina_lora(model, device,rank=common_config.client_rank, alpha=common_config.client_rank * 2)
-        if memory < 8:
+        if common_config.enable_sys_heter and memory < 8:
             # untrainable
             trainable = False
     else:
@@ -262,6 +267,7 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
         logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
 
     ##########################
+    logger.info(f"trainbale: {trainable}")
     if trainable:
         # TODO: set local step
         local_steps = int(num_train / common_config.batch_size)
@@ -359,9 +365,11 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
         logger.info(f"recevied paras from server...")
         for layer, paras in received_paras.items():
             # logger.info(f"\t{layer} --> paras")
+            layer_trainable = model_state_dict[layer].requires_grad
             model_state_dict[layer] = paras.to(device)
+            model_state_dict[layer].requires_grad = layer_trainable
         # according to the resource constraint, update trainable paras
-        set_trainble_para(model, memory)
+        # set_trainble_para(model, memory)
         # logger.info("local model after updating: ")
         # for layer, paras in model.named_parameters():
         #     logger.info(f"\t{layer} --> {paras}")
@@ -384,7 +392,9 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
                     received_paras[layer] = paras[:, : common_config.client_rank]
 
         for layer, paras in received_paras.items():
+            layer_trainable = model_state_dict[layer].requires_grad
             model_state_dict[layer] = paras.to(device)
+            model_state_dict[layer].requires_grad = layer_trainable
     
 
 

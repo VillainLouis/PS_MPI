@@ -46,6 +46,8 @@ class CommonConfig:
         # self.lora_layers = []
         self.finetune_type = None
         self.fedlora_rank = None
+        self.fedlora_depth = None
+
         self.heterlora_max_rank = None
         self.heterlora_min_rank = None
         self.client_rank = None
@@ -53,6 +55,9 @@ class CommonConfig:
         self.our_total_rank = None
         self.fedadpter_width = None
         self.fedadpter_depth = None
+
+        self.enable_sys_heter = None
+
 class ClientConfig:
     def __init__(self,
                 common_config,
