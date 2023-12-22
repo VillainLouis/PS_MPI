@@ -124,7 +124,7 @@ def main():
     common_config.fedadpter_depth = client_config.common_config.fedadpter_depth
 
     common_config.enable_sys_heter = client_config.common_config.enable_sys_heter
-
+    common_config.test_target_matrix = client_config.common_config.test_target_matrix
     memory = client_config.memory
     logger.info(f"memory capacity --> {memory} GiB")
 
@@ -142,7 +142,7 @@ def main():
             # untrainable
             trainable = False
     elif common_config.finetune_type == "fedlora":
-        model = vallina_lora(model, depth=common_config.fedlora_depth, rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2)
+        model = vallina_lora(model, depth=common_config.fedlora_depth, rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2, test_target_matrix= common_config.test_target_matrix)
         if common_config.enable_sys_heter and memory < 8:
             # untrainable
             trainable = False

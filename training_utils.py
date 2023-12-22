@@ -155,7 +155,7 @@ def add_adapter(model, width = 32, depth = 12):
     return model
 
 
-def vallina_lora(model, depth = 12, rank = 8, alpha = 32):
+def vallina_lora(model, depth = 12, rank = 8, alpha = 32, test_target_matrix=None):
     ####################################################
     ranks = [rank for _ in range(depth)]
     # print(f"ranks --> {ranks}")
@@ -164,10 +164,24 @@ def vallina_lora(model, depth = 12, rank = 8, alpha = 32):
     target_ffn_matrix = dict()
 
     last_layer_idx = 11
-    for idx, r in enumerate(ranks):
-        layer_rank[str(last_layer_idx - idx)] = r
-        target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
-        target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+    if test_target_matrix is None:
+        for idx, r in enumerate(ranks):
+            layer_rank[str(last_layer_idx - idx)] = r
+            target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
+            target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+    else:
+        for idx, r in enumerate(ranks):
+            layer_rank[str(last_layer_idx - idx)] = r
+            if test_target_matrix in ["query", "key", "value", "attn.output"]:
+                if test_target_matrix == "attn.output":
+                    test_target_matrix = "output"
+                target_attn_matrix[str(last_layer_idx - idx)] = [test_target_matrix]
+                test_target_matrix = "attn.output"
+            elif test_target_matrix in ["intermediate", "ffn.output"]:
+                if test_target_matrix == "ffn.output":
+                    test_target_matrix = "output"
+                target_ffn_matrix[str(last_layer_idx - idx)] = [test_target_matrix]
+                test_target_matrix = "ffn.output"
 
     only_lora_B = False
     for layer in target_attn_matrix.keys():

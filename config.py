@@ -58,6 +58,8 @@ class CommonConfig:
 
         self.enable_sys_heter = None
 
+        self.test_target_matrix = None
+
 class ClientConfig:
     def __init__(self,
                 common_config,

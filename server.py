@@ -57,6 +57,8 @@ parser.add_argument("--partitial_data", type=float, default=1.0)
 
 parser.add_argument("--enable_sys_heter", type=bool, default=False)
 
+parser.add_argument('--test_target_matrix', type=str, default=None)
+
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
@@ -120,6 +122,8 @@ def main():
     common_config.enable_sys_heter = args.enable_sys_heter
     logger.info(f"system heter is enable ? --> {common_config.enable_sys_heter}")
     logger.info(f"data hetero is enable ? --> {common_config.data_pattern == 1}")
+    common_config.test_target_matrix = args.test_target_matrix
+    logger.info(f"test target marix = {common_config.test_target_matrix}")
     worker_num = int(csize)-1
 
     logger.info(f"learning rate: {common_config.lr}")
@@ -140,7 +144,7 @@ def main():
         pass
     elif common_config.finetune_type == "fedlora":
         logger.info(f"fedlora_rank --> {args.fedlora_rank} fedlora_depth --> {common_config.fedlora_depth}")
-        global_model = vallina_lora(global_model, depth=common_config.fedlora_depth, rank=args.fedlora_rank, alpha=args.fedlora_rank * 2)
+        global_model = vallina_lora(global_model, depth=common_config.fedlora_depth, rank=args.fedlora_rank, alpha=args.fedlora_rank * 2, test_target_matrix=common_config.test_target_matrix)
     elif common_config.finetune_type == "fedadapter":
         logger.info(f"common_config.fedadpter_width = {common_config.fedadpter_width}, common_config.fedadpter_depth = {common_config.fedadpter_depth}")
         global_model = add_adapter(global_model, width=common_config.fedadpter_width, depth=common_config.fedadpter_depth)
