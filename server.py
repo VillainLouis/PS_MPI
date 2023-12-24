@@ -153,7 +153,7 @@ def main():
         global_model = customized_lora(global_model,common_config.our_total_rank, memory=100)
     elif common_config.finetune_type == "heterlora":
         logger.info(f"heterlora_rank --> max: {common_config.heterlora_max_rank} min: {common_config.heterlora_min_rank}")
-        global_model = vallina_lora(global_model, device,rank=common_config.heterlora_max_rank, alpha=common_config.heterlora_max_rank * 2)
+        global_model = vallina_lora(global_model, rank=common_config.heterlora_max_rank, alpha=common_config.heterlora_max_rank * 2)
         max_num = common_config.heterlora_max_rank
         min_num = common_config.heterlora_min_rank
         powers_of_two = []  
@@ -209,7 +209,8 @@ def main():
 
     # use alpha to control the overall data partition
     if args.data_pattern != 0:
-        logger.info("non-IID partition prepare...")
+        logger.info("non-IID partition prepare... ")
+        logger.info(f"alpha --> {alpha}")
         if args.dataset_type == "sst2":    
             label_vocab = {'negative': 0, 'positive': 1}
             label_map = {0 : 'negative', 1 : 'positive'}

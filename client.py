@@ -155,7 +155,7 @@ def main():
         model = customized_lora(model,common_config.our_total_rank, memory)
     elif common_config.finetune_type == "heterlora":
         logger.info(f"clint's heterlora_rank --> {common_config.client_rank}")
-        model = vallina_lora(model, device,rank=common_config.client_rank, alpha=common_config.client_rank * 2)
+        model = vallina_lora(model, rank=common_config.client_rank, alpha=common_config.client_rank * 2)
         if common_config.enable_sys_heter and memory < 8:
             # untrainable
             trainable = False
