@@ -10,7 +10,7 @@ from config import *
 import torch.nn.functional as F
 import mydatasets
 import mymodels
-from training_utils import test, eval_step, vallina_lora, add_adapter, customized_lora
+from training_utils import test, eval_step, vallina_lora, add_adapter, customized_lora, customized_lora_avg
 
 from mpi4py import MPI
 
@@ -42,7 +42,7 @@ parser.add_argument('--seed', type=int, default=42)
 parser.add_argument('--fedlora_rank', type=int, default=4)
 parser.add_argument('--fedlora_depth', type=int, default=12)
 
-parser.add_argument('--finetune_type', type=str, choices=["fedft", "fedlora", "fedadapter", "our", "heterlora"])
+parser.add_argument('--finetune_type', type=str, choices=["fedft", "fedlora", "fedadapter", "our", "heterlora", "our_avg"])
 
 parser.add_argument("--max_rank", type=int, default=64)
 parser.add_argument("--min_rank", type=int, default=2)
@@ -128,7 +128,7 @@ def main():
 
     logger.info(f"learning rate: {common_config.lr}")
     ###################################### init config #############################################
-    pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
+    pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
 
     ###################################### init model ###############################################
     # from mymodels import SST
@@ -151,6 +151,9 @@ def main():
     elif common_config.finetune_type == "our":
         logger.info(f"common_config.our_total_rank = {common_config.our_total_rank}")
         global_model = customized_lora(global_model,common_config.our_total_rank, memory=100)
+    elif common_config.finetune_type == "our_avg":
+        logger.info(f"common_config.our_total_rank = {common_config.our_total_rank}")
+        global_model = customized_lora_avg(global_model,common_config.our_total_rank, memory=100)
     elif common_config.finetune_type == "heterlora":
         logger.info(f"heterlora_rank --> max: {common_config.heterlora_max_rank} min: {common_config.heterlora_min_rank}")
         global_model = vallina_lora(global_model, rank=common_config.heterlora_max_rank, alpha=common_config.heterlora_max_rank * 2)
@@ -253,6 +256,9 @@ def main():
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     
     ###################### Sending init config to clients ###############################
+    global_comm_cost = 0
+    for _ in range(worker_num):
+        global_comm_cost += model_size
     logger.info(f"Sending init config to all clients and start the training procedure")
     communication_parallel(worker_list, 1, comm, action="init")
 

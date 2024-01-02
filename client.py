@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.nn.utils import vector_to_parameters
 from config import ClientConfig, CommonConfig
 from comm_utils import *
-from training_utils import train, test, training_step, eval_step, vallina_lora, add_adapter, customized_lora, set_trainble_para
+from training_utils import train, test, training_step, eval_step, vallina_lora, add_adapter, customized_lora, set_trainble_para, customized_lora_avg
 import mydatasets, mymodels
 from mpi4py import MPI
 import logging
@@ -130,7 +130,7 @@ def main():
 
     common_config.tag = 1
 
-    pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
+    pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
     from mymodels import CustomBERTModel
     num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
     model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
@@ -153,6 +153,9 @@ def main():
             trainable = False
     elif common_config.finetune_type == "our":
         model = customized_lora(model,common_config.our_total_rank, memory)
+    elif common_config.finetune_type == "our_avg":
+        logger.info(f"common_config.our_total_rank = {common_config.our_total_rank}")
+        model = customized_lora_avg(model,common_config.our_total_rank, memory)
     elif common_config.finetune_type == "heterlora":
         logger.info(f"clint's heterlora_rank --> {common_config.client_rank}")
         model = vallina_lora(model, rank=common_config.client_rank, alpha=common_config.client_rank * 2)

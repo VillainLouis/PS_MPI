@@ -76,6 +76,57 @@ def customized_lora(model, all_rank, memory):
     
     return set_trainble_para(model, memory)
 
+def customized_lora_avg(model, all_rank, memory):
+    ranks = [all_rank // 6 for _ in range(6)]
+    # print(f"ranks --> {ranks}")
+    layer_rank = dict()
+    target_attn_matrix = dict()
+    target_ffn_matrix = dict()
+
+    last_layer_idx = 11
+    for idx, r in enumerate(ranks):
+        layer_rank[str(last_layer_idx - idx)] = r
+        target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
+        target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+
+    only_lora_B = False
+    for layer in target_attn_matrix.keys():
+        for matrix in target_attn_matrix[layer]:
+            rank = layer_rank[layer]
+            alpha = 2 * rank
+            # set attention.output
+            if matrix == "output":
+                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
+            else:
+                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+            
+
+    for layer in target_ffn_matrix.keys():
+        for matrix in target_ffn_matrix[layer]:
+            rank = layer_rank[layer]
+            module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
+            lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+            if only_lora_B:
+                lora_layer.lora_A.requires_grad = False
+            lora_layer.weight = module.weight
+            lora_layer.bias = module.bias
+            model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+    lora.mark_only_lora_as_trainable(model)
+    
+    return set_trainble_para(model, memory)
+
 def set_trainble_para(model, memory):
     # set layers according to memory
     if memory == 2:
@@ -99,6 +150,44 @@ def set_trainble_para(model, memory):
     elif memory == 6:
         for layer, para in model.named_parameters():
             if "8" in layer or "9" in layer or "10" in layer or "11" in layer:
+                if "lora" in layer:
+                    para.requires_grad = True
+                else:
+                    para.requires_grad = False
+            else:
+                para.requires_grad = False
+    else:
+        pass
+    # 设置head可训练
+    model._modules["linear"].weight.requires_grad = True
+    model._modules["linear"].bias.requires_grad = True
+    
+    return model
+
+
+def set_trainble_para_v2(model, memory):
+    # set layers according to memory
+    if memory == 2:
+        for layer, para in model.named_parameters():
+            if "11" in layer or "10" in layer or "9" in layer:
+                if "lora" in layer:
+                    para.requires_grad = True
+                else:
+                    para.requires_grad = False
+            else:
+                para.requires_grad = False
+    elif memory == 4:
+        for layer, para in model.named_parameters():
+            if "11" in layer or "10" in layer or "9" in layer or "8" in layer or "7" in layer or "6" in layer:
+                if "lora" in layer:
+                    para.requires_grad = True
+                else:
+                    para.requires_grad = False
+            else:
+                para.requires_grad = False
+    elif memory == 6:
+        for layer, para in model.named_parameters():
+            if "11" in layer or "10" in layer or "9" in layer or "8" in layer or "7" in layer or "6" in layer or "5" in layer or "4" in layer or "3" in layer:
                 if "lora" in layer:
                     para.requires_grad = True
                 else:
