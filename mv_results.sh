@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ $# -lt 1]; then
+if [ $# -lt 1 ]; then
     echo "A new name is need for current result."
     echo "Usage: mv_results.sh [new_record_name]"
     exit 1

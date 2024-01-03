@@ -168,7 +168,14 @@ def main():
     else:
         raise NotImplementedError
     
-    
+    trainable_paras = 0
+    for layer, para in global_model.named_parameters():
+        if para.requires_grad:
+            trainable_paras += para.numel()
+
+        if "out_layer" in layer:
+            trainable_paras += para.numel()
+    trainable_paras_size = trainable_paras * 4 / 1024 / 1024
     # global_model = mymodels.create_model_instance(common_config.dataset_type, common_config.model_type)
     common_config.para_nums = sum(p.numel() for p in global_model.parameters())
     model_size = common_config.para_nums * 4 / 1024 / 1024
@@ -232,15 +239,16 @@ def main():
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
     # memory heterogeneity
-    memory_size = [2, 4, 6, 8, 12] 
-    memory_prop = [0.1, 0.3, 0.3, 0.2, 0.1]  
+    # memory_size = [4, 6, 8] 
+    # memory_prop = [0.4, 0.3, 0.3]  
 
-    client_memory = np.random.choice(
-        memory_size,
-        size=worker_num, 
-        p=memory_prop  
-    )
-    client_memory = [ 4, 12,  8,  6 , 4 , 4 , 2,  8 , 6 , 8  ,2, 12,  8 , 4  ,4,  4,  4 , 6  ,6,  4]
+    # client_memory = np.random.choice(
+    #     memory_size,
+    #     size=worker_num, 
+    #     p=memory_prop  
+    # )
+    client_memory = [4,4,4,4,4,4,4, 6,6,6,6,6,6,6, 8,8,8,8,8,8]
+    random.shuffle(client_memory)
     logger.info(f"client_memory --> {client_memory}")
     for worker_idx, worker in enumerate(worker_list):
         worker.config.para = global_model.state_dict()
@@ -253,20 +261,94 @@ def main():
         worker.config.memory = client_memory[worker_idx]
         if common_config.finetune_type == "heterlora":
             worker.config.heterlora_client_rank = random.choice(powers_of_two)
+
+        # 根据设备的类型和方法，设置本地训练时间
+        
+        if common_config.dataset_type == "sst2":
+            if common_config.finetune_type == "fedft":
+                pass
+            elif common_config.finetune_type == "fedlora":
+                if worker.config.memory == 4:
+                    worker.config.local_training_time = 2.02
+                elif worker.config.memory == 6:
+                    worker.config.local_training_time = 1.09
+                elif worker.config.memory == 8:
+                    worker.config.local_training_time = 0.76
+            elif common_config.finetune_type == "fedadapter":
+                if worker.config.memory == 4:
+                    worker.config.local_training_time = 1.43
+                elif worker.config.memory == 6:
+                    worker.config.local_training_time = 0.78
+                elif worker.config.memory == 8:
+                    worker.config.local_training_time = 0.59
+            elif common_config.finetune_type == "our":
+                if worker.config.memory == 4:
+                    worker.config.local_training_time = 1.38
+                elif worker.config.memory == 6:
+                    worker.config.local_training_time = 0.79
+                elif worker.config.memory == 8:
+                    worker.config.local_training_time = 0.59
+            elif common_config.finetune_type == "our_avg":
+                if worker.config.memory == 4:
+                    pass
+                elif worker.config.memory == 6:
+                    pass
+                elif worker.config.memory == 8:
+                    pass
+            elif common_config.finetune_type == "heterlora":
+                if worker.config.memory == 4:
+                    worker.config.local_training_time = 2.02
+                elif worker.config.memory == 6:
+                    worker.config.local_training_time = 1.09
+                elif worker.config.memory == 8:
+                    worker.config.local_training_time = 0.76
         # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     
     ###################### Sending init config to clients ###############################
-    global_comm_cost = 0
-    for _ in range(worker_num):
-        global_comm_cost += model_size
     logger.info(f"Sending init config to all clients and start the training procedure")
     communication_parallel(worker_list, 1, comm, action="init")
+
+    mu = 1 
+    min_uploading_bandwidth = 1
+    max_uploading_bandwidth = 3
+    sigma = 2.25
+    
+    downloading_bandwidth = 15.0
+    global_comm_cost = 0
+    global_time = 0.0
+
+    # 下发模型
+    global_comm_cost += model_size * worker_num   
+    global_time += model_size / downloading_bandwidth 
 
     max_acc = 0.0
     for epoch_idx in range(1, 1+common_config.epoch):
         logger.info(f"################## Round {epoch_idx} begin #####################")
         logger.info("Waiting and receiving updated paras from clients")
         communication_parallel(worker_list, epoch_idx, comm, action="get_para")
+        # 根据接收的参数，计算客户端发送的可训练参数的时间和服务器下发模型的时间，根据设备的类型得到本地计算时间
+        ## 每一轮的时间都是由本地训练时间和通讯时间之和中最大的值 max(local_training + uploading_time)
+        current_round_time = 0
+        with torch.no_grad():
+            for worker_idx in range(len(worker_list)):
+                clinet_uploaded_para_size = 0
+                for layer, paras in worker_list[worker_idx].config.neighbor_paras.items():
+                    clinet_uploaded_para_size += paras.numel()
+                clinet_uploaded_para_size = clinet_uploaded_para_size * 4 / 1024 / 1024
+                global_comm_cost += clinet_uploaded_para_size # 上传服务器通信量
+                uploading_bandwidth = np.random.normal(mu, sigma, 1)
+                uploading_bandwidth = np.clip(uploading_bandwidth, min_uploading_bandwidth, max_uploading_bandwidth)[0]
+                client_uploading_time = clinet_uploaded_para_size / uploading_bandwidth
+                client_local_training_time = worker_list[worker_idx].config.local_training_time * (len(worker.config.train_data_idxes) / common_config.batch_size)
+                current_round_time = max(current_round_time, client_uploading_time + client_local_training_time)
+        logger.info(f"current round time (local training + uploading) --> {current_round_time}")
+        ## 模型上传和训练时间的最大值，加上下发模型参数的时间
+        logger.info(f"current distribute time --> {trainable_paras_size / downloading_bandwidth}")
+        global_time += current_round_time + trainable_paras_size / downloading_bandwidth
+        global_comm_cost += trainable_paras_size * worker_num
+        logger.info(f"Current global time --> {global_time}")
+        logger.info(f"Current global comm cost --> {global_comm_cost}")
+
         logger.info("Clients' information received.")
         logger.info("Performing aggregation...")
         global_para = parameter_wise_aggregation(worker_list, common_config)

@@ -143,7 +143,7 @@ def main():
             trainable = False
     elif common_config.finetune_type == "fedlora":
         model = vallina_lora(model, depth=common_config.fedlora_depth, rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2, test_target_matrix= common_config.test_target_matrix)
-        if common_config.enable_sys_heter and memory < 8:
+        if common_config.enable_sys_heter and memory < 6:
             # untrainable
             trainable = False
     elif common_config.finetune_type == "fedadapter":
@@ -159,7 +159,7 @@ def main():
     elif common_config.finetune_type == "heterlora":
         logger.info(f"clint's heterlora_rank --> {common_config.client_rank}")
         model = vallina_lora(model, rank=common_config.client_rank, alpha=common_config.client_rank * 2)
-        if common_config.enable_sys_heter and memory < 8:
+        if common_config.enable_sys_heter and memory < 6:
             # untrainable
             trainable = False
     else:
@@ -199,6 +199,7 @@ def main():
 
         if "out_layer" in layer:
             logger.info(f"{layer} --> {para}")
+            trainable_paras += para.numel()
     logger.info(f"Trainable paras: {trainable_paras}, all paras: {all_paras} ---> {trainable_paras / all_paras}")
     
     ########################################## init training and test set ##################################
@@ -247,27 +248,27 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
 
     ######### evaluation before training #########
     # evaluation
-    logger.info("evaluation before training")
-    iterator = iter(test_loader)
-    trange = range(len(test_loader))
-    model.eval()
-    loss_all=[]
-    metric_name = model.metric.name
-    metric_1_name = None if model.metric_1 is None else model.metric_1.name
-    metric_all=[]
-    metric_1_all = []
-    for step in trange:
-        inputs = prepare_inputs(next(iterator), device)
-        step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
-        loss_all.append(step_loss.item())
-        metric_all.append(step_metric[model.metric.name])
-        if model.metric_1 is not None: 
-            metric_1_all.append(step_metric_1[model.metric_1.name])
+    # logger.info("evaluation before training")
+    # iterator = iter(test_loader)
+    # trange = range(len(test_loader))
+    # model.eval()
+    # loss_all=[]
+    # metric_name = model.metric.name
+    # metric_1_name = None if model.metric_1 is None else model.metric_1.name
+    # metric_all=[]
+    # metric_1_all = []
+    # for step in trange:
+    #     inputs = prepare_inputs(next(iterator), device)
+    #     step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
+    #     loss_all.append(step_loss.item())
+    #     metric_all.append(step_metric[model.metric.name])
+    #     if model.metric_1 is not None: 
+    #         metric_1_all.append(step_metric_1[model.metric_1.name])
             
-    logger.info(f"test loss --> {mean(loss_all)}")
-    logger.info(f"test {metric_name} --> {mean(metric_all)} ")
-    if model.metric_1 is not None:
-        logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
+    # logger.info(f"test loss --> {mean(loss_all)}")
+    # logger.info(f"test {metric_name} --> {mean(metric_all)} ")
+    # if model.metric_1 is not None:
+    #     logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
 
     ##########################
     logger.info(f"trainbale: {trainable}")

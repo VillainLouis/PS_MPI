@@ -12,21 +12,38 @@ from typing import Any, Dict, Union
 import loralib as lora
 
 def customized_lora(model, all_rank, memory):
-    def findMaxLowerPowerOf2(n):
-        power = math.floor(math.log2(n))
-        return 1 << (power - 1)
+    # def findMaxLowerPowerOf2(n):
+    #     power = math.floor(math.log2(n))
+    #     return 1 << (power - 1)
 
-    def alg(all_rank, max_len):
-        ans = list()
-        while all_rank > 2:
-            ans.append(findMaxLowerPowerOf2(all_rank))
-            all_rank -= ans[-1]
-            if len(ans) == max_len:
-                return ans
-        if all_rank == 2:
-            ans.append(all_rank) 
-        return ans
-    ranks = alg(all_rank, 6)
+    # def alg(all_rank, max_len):
+    #     ans = list()
+    #     while all_rank > 2:
+    #         ans.append(findMaxLowerPowerOf2(all_rank))
+    #         all_rank -= ans[-1]
+    #         if len(ans) == max_len:
+    #             return ans
+    #     if all_rank == 2:
+    #         ans.append(all_rank) 
+    #     return ans
+    def my_alg(num, parts):
+        res = []
+        while num > 0:
+            if len(res) < parts - 1:
+                cur = int(num / 2)
+                res.append(cur)
+                num -= cur
+            else:
+                if res[-1] < num:
+                    tmp = res[-1]
+                    res[-1] = num
+                    res.append(tmp)
+                else:
+                    res.append(num)
+                break
+            # print(res)
+        return res
+    ranks = my_alg(all_rank, 6)
     # print(f"ranks --> {ranks}")
     layer_rank = dict()
     target_attn_matrix = dict()
@@ -129,8 +146,19 @@ def customized_lora_avg(model, all_rank, memory):
 
 def set_trainble_para(model, memory):
     # set layers according to memory
-    if memory == 2:
+    # if memory == 2:
+    #     for layer, para in model.named_parameters():
+    #         if "11" in layer:
+    #             if "lora" in layer:
+    #                 para.requires_grad = True
+    #             else:
+    #                 para.requires_grad = False
+    #         else:
+    #             para.requires_grad = False
+    if memory == 4:
+        # Jetson tx2
         for layer, para in model.named_parameters():
+            # if "10" in layer or "11" in layer:
             if "11" in layer:
                 if "lora" in layer:
                     para.requires_grad = True
@@ -138,8 +166,10 @@ def set_trainble_para(model, memory):
                     para.requires_grad = False
             else:
                 para.requires_grad = False
-    elif memory == 4:
+    elif memory == 6:
+        # Jetson nx
         for layer, para in model.named_parameters():
+            # if "8" in layer or "9" in layer or "10" in layer or "11" in layer:
             if "10" in layer or "11" in layer:
                 if "lora" in layer:
                     para.requires_grad = True
@@ -147,16 +177,8 @@ def set_trainble_para(model, memory):
                     para.requires_grad = False
             else:
                 para.requires_grad = False
-    elif memory == 6:
-        for layer, para in model.named_parameters():
-            if "8" in layer or "9" in layer or "10" in layer or "11" in layer:
-                if "lora" in layer:
-                    para.requires_grad = True
-                else:
-                    para.requires_grad = False
-            else:
-                para.requires_grad = False
     else:
+        # Jetson agx
         pass
     # 设置head可训练
     model._modules["linear"].weight.requires_grad = True

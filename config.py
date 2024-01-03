@@ -88,6 +88,9 @@ class ClientConfig:
         # heterlora
         self.heterlora_client_rank = None
 
+        self.local_training_time = None
+
+
 class BertForMRCConfig(object):
     def __init__(self):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
