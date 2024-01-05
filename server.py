@@ -230,6 +230,56 @@ def main():
             ])
             train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+        
+        elif args.dataset_type == "qnli" or args.dataset_type == "rte" or args.dataset_type == "wnli":    
+            label_vocab = {'entailment': 0, 'not_entailment': 1}
+            label_map = {0 : 'entailment', 1 : 'not_entailment'}
+            label_assignment_train = np.array([
+                label_map[int(train_dataset[idx]['label'])]
+                for idx in range(len(train_dataset))
+            ])
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+
+        elif args.dataset_type == "mrpc":    
+            label_vocab = {'not_equivalent': 0, 'equivalent': 1}
+            label_map = {0 : 'not_equivalent', 1 : 'equivalent'}
+            label_assignment_train = np.array([
+                label_map[int(train_dataset[idx]['label'])]
+                for idx in range(len(train_dataset))
+            ])
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+
+        elif args.dataset_type == "qqp":    
+            label_vocab = {'not_duplicate': 0, 'duplicate': 1}
+            label_map = {0 : 'not_duplicate', 1 : 'duplicate'}
+            label_assignment_train = np.array([
+                label_map[int(train_dataset[idx]['label'])]
+                for idx in range(len(train_dataset))
+            ])
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+        
+        elif args.dataset_type == "mnli" or args.dataset_type == "mnli-mm":    
+            label_vocab = {'entailment': 0, 'neutral': 1, "contradiction": 2}
+            label_map = {0 : 'entailment', 1 : 'neutral', 2: "contradiction" }
+            label_assignment_train = np.array([
+                label_map[int(train_dataset[idx]['label'])]
+                for idx in range(len(train_dataset))
+            ])
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+
+        elif args.dataset_type == "cola":    
+            label_vocab = {'unacceptable': 0, 'acceptable': 1}
+            label_map = {0 : 'unacceptable', 1 : 'acceptable'}
+            label_assignment_train = np.array([
+                label_map[int(train_dataset[idx]['label'])]
+                for idx in range(len(train_dataset))
+            ])
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         else:
             raise NotImplementedError
     else:
@@ -247,7 +297,11 @@ def main():
     #     size=worker_num, 
     #     p=memory_prop  
     # )
-    client_memory = [4,4,4,4,4,4,4, 6,6,6,6,6,6,6, 8,8,8,8,8,8]
+    edge = 7
+    nx = 7
+    agx = 6
+    Jetson_num = edge + nx + agx
+    client_memory = [4 for _ in range(edge)] + [6 for _ in range(nx)] + [8 for _ in range(agx)]
     random.shuffle(client_memory)
     logger.info(f"client_memory --> {client_memory}")
     for worker_idx, worker in enumerate(worker_list):

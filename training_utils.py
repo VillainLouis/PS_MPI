@@ -12,20 +12,20 @@ from typing import Any, Dict, Union
 import loralib as lora
 
 def customized_lora(model, all_rank, memory):
-    # def findMaxLowerPowerOf2(n):
-    #     power = math.floor(math.log2(n))
-    #     return 1 << (power - 1)
+    def findMaxLowerPowerOf2(n):
+        power = math.floor(math.log2(n))
+        return 1 << (power - 1)
 
-    # def alg(all_rank, max_len):
-    #     ans = list()
-    #     while all_rank > 2:
-    #         ans.append(findMaxLowerPowerOf2(all_rank))
-    #         all_rank -= ans[-1]
-    #         if len(ans) == max_len:
-    #             return ans
-    #     if all_rank == 2:
-    #         ans.append(all_rank) 
-    #     return ans
+    def alg(all_rank, max_len):
+        ans = list()
+        while all_rank > 2:
+            ans.append(findMaxLowerPowerOf2(all_rank))
+            all_rank -= ans[-1]
+            if len(ans) == max_len:
+                return ans
+        if all_rank == 2:
+            ans.append(all_rank) 
+        return ans
     def my_alg(num, parts):
         res = []
         while num > 0:
