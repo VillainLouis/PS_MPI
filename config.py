@@ -90,6 +90,8 @@ class ClientConfig:
 
         self.local_training_time = None
 
+        self.client_idx = None
+
 
 class BertForMRCConfig(object):
     def __init__(self):

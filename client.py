@@ -29,6 +29,10 @@ from numpy import mean
 from glue_utils import prepare_inputs
 
 
+from transformers import BertTokenizerFast
+from transformers.data.data_collator import DataCollatorWithPadding
+
+
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
 parser.add_argument('--use_cuda', action="store_false", default=True)
@@ -77,153 +81,165 @@ async def get_init_config(comm, MASTER_RANK, config):
     for k, v in config_received.__dict__.items():
         setattr(config, k, v)
 
+
 def main():
-    logger.info("client_rank:{}".format(rank))
-    client_config = ClientConfig(
-        common_config=CommonConfig()
-    )
-    
-    logger.info("Receiving init config from the server...")
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    tasks = []
-    task = asyncio.ensure_future(
-        get_init_config(comm,MASTER_RANK,client_config)
-        )
-    tasks.append(task)
-    loop.run_until_complete(asyncio.wait(tasks))
-    loop.close()
-    logger.info("init config acknowledged.")
-    
-    common_config = CommonConfig()
-    common_config.model_type = client_config.common_config.model_type
-    common_config.dataset_type = client_config.common_config.dataset_type
-    common_config.batch_size = client_config.common_config.batch_size
-    common_config.data_pattern=client_config.common_config.data_pattern
-    common_config.lr = client_config.common_config.lr
-    logger.info(f"common_config.lr --> {common_config.lr}")
-    common_config.decay_rate = client_config.common_config.decay_rate
-    common_config.min_lr=client_config.common_config.min_lr
-    common_config.epoch = client_config.common_config.epoch
-    common_config.momentum = client_config.common_config.momentum
-    common_config.weight_decay = client_config.common_config.weight_decay
-    common_config.data_path = client_config.common_config.data_path
-    common_config.para=client_config.para
-    common_config.fedlora_rank = client_config.common_config.fedlora_rank
-    common_config.fedlora_depth = client_config.common_config.fedlora_depth
-
-    common_config.finetune_type = client_config.common_config.finetune_type
-
-    common_config.heterlora_max_rank = client_config.common_config.heterlora_max_rank
-    common_config.heterlora_min_rank = client_config.common_config.heterlora_min_rank
-
-    common_config.client_rank = client_config.heterlora_client_rank
-    common_config.our_total_rank = client_config.common_config.our_total_rank
-
-    common_config.fedadpter_width = client_config.common_config.fedadpter_width
-    common_config.fedadpter_depth = client_config.common_config.fedadpter_depth
-
-    common_config.enable_sys_heter = client_config.common_config.enable_sys_heter
-    common_config.test_target_matrix = client_config.common_config.test_target_matrix
-    memory = client_config.memory
-    logger.info(f"memory capacity --> {memory} GiB")
-
-    common_config.tag = 1
-
-    pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
-    from mymodels import CustomBERTModel
-    num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
-    model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
-
-    trainable = True
-    logger.info(f"common_config.enable_sys_heter --> {common_config.enable_sys_heter}")
-    if common_config.finetune_type == "fedft":
-        if common_config.enable_sys_heter and memory < 12:
-            # untrainable
-            trainable = False
-    elif common_config.finetune_type == "fedlora":
-        model = vallina_lora(model, depth=common_config.fedlora_depth, rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2, test_target_matrix= common_config.test_target_matrix)
-        if common_config.enable_sys_heter and memory < 6:
-            # untrainable
-            trainable = False
-    elif common_config.finetune_type == "fedadapter":
-        model = add_adapter(model, width=common_config.fedadpter_width, depth=common_config.fedadpter_depth)
-        if common_config.enable_sys_heter and memory < 6:
-            # untrainable
-            trainable = False
-    elif common_config.finetune_type == "our":
-        model = customized_lora(model,common_config.our_total_rank, memory)
-    elif common_config.finetune_type == "our_avg":
-        logger.info(f"common_config.our_total_rank = {common_config.our_total_rank}")
-        model = customized_lora_avg(model,common_config.our_total_rank, memory)
-    elif common_config.finetune_type == "heterlora":
-        logger.info(f"clint's heterlora_rank --> {common_config.client_rank}")
-        model = vallina_lora(model, rank=common_config.client_rank, alpha=common_config.client_rank * 2)
-        if common_config.enable_sys_heter and memory < 6:
-            # untrainable
-            trainable = False
-    else:
-        raise NotImplementedError
     
     
-    logger.info(f"Is this client trainable? --> {trainable}")
-
-    # heterlora truncate
-    if common_config.finetune_type == "heterlora":
-        logger.info("truncate tensors")
-        for layer, paras in common_config.para.items():
-            if "lora_A" in layer:
-                # logger.info(f"before truncate {layer}, shape = {paras.shape}")
-                common_config.para[layer] = paras[:common_config.client_rank, :]
-                # logger.info(f"after truncate {layer}, shape = {paras.shape}")
-            if "lora_B" in layer:
-                # logger.info(f"before truncate {layer}, shape = {paras.shape}")
-                common_config.para[layer] = paras[:, : common_config.client_rank]
-                # logger.info(f"after truncate {layer}, shape = {paras.shape}")
-
-    model.load_state_dict(common_config.para)
-
-    model.to(device)
-    # TODO:according to different method, set the trainable parameters of the model
-
-    logger.info(f"common_config.finetune_type --> {common_config.finetune_type}")
-
-    logger.info(f"Trainable parameters info --> ")
-    trainable_paras = 0
-    all_paras = 0
-    for layer, para in model.named_parameters():
-        all_paras += para.numel()
-        if para.requires_grad:
-            logger.info(f"{layer} --> para.shape = {para.shape}")
-            trainable_paras += para.numel()
-
-        if "out_layer" in layer:
-            logger.info(f"{layer} --> {para}")
-            trainable_paras += para.numel()
-    logger.info(f"Trainable paras: {trainable_paras}, all paras: {all_paras} ---> {trainable_paras / all_paras}")
+    global_round = 1
     
-    ########################################## init training and test set ##################################
-    train_dataset = client_config.source_train_dataset
-    test_dataset = client_config.test_dataset
-
-    logger.info(f"len(client_config.train_data_idxes) = {len(client_config.train_data_idxes)}")
-    from transformers import BertTokenizerFast
-    from transformers.data.data_collator import DataCollatorWithPadding
-    tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
-    data_collator = DataCollatorWithPadding(tokenizer)
-    train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes, collate_fn=data_collator)
-    test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False, collate_fn=data_collator)
-
     # TODO: optimize only the trainable parameters
-    optimizer=torch.optim.SGD(model.parameters(),common_config.lr) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
     # batch_size = 32
     # train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
     # test_loader=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
     
 
     while True:
+        ## 接收client的配置和最新的全局模型
+        
+        logger.info(f"##################### Round {global_round} start ... #########################")
+
+        logger.info("client_rank:{}".format(rank))
+        client_config = ClientConfig(
+            common_config=CommonConfig()
+        )
+        
+        logger.info("Receiving init config from the server...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        tasks = []
+        task = asyncio.ensure_future(
+            get_init_config(comm,MASTER_RANK,client_config)
+            )
+        tasks.append(task)
+        loop.run_until_complete(asyncio.wait(tasks))
+        loop.close()
+        logger.info("init config acknowledged.")
+        
+        common_config = CommonConfig()
+        common_config.model_type = client_config.common_config.model_type
+        common_config.dataset_type = client_config.common_config.dataset_type
+        common_config.batch_size = client_config.common_config.batch_size
+        common_config.data_pattern=client_config.common_config.data_pattern
+        common_config.lr = client_config.common_config.lr
+        logger.info(f"common_config.lr --> {common_config.lr}")
+        common_config.decay_rate = client_config.common_config.decay_rate
+        common_config.min_lr=client_config.common_config.min_lr
+        common_config.epoch = client_config.common_config.epoch
+        common_config.momentum = client_config.common_config.momentum
+        common_config.weight_decay = client_config.common_config.weight_decay
+        common_config.data_path = client_config.common_config.data_path
+        common_config.para=client_config.para
+        common_config.fedlora_rank = client_config.common_config.fedlora_rank
+        common_config.fedlora_depth = client_config.common_config.fedlora_depth
+
+        common_config.finetune_type = client_config.common_config.finetune_type
+
+        common_config.heterlora_max_rank = client_config.common_config.heterlora_max_rank
+        common_config.heterlora_min_rank = client_config.common_config.heterlora_min_rank
+
+        common_config.client_rank = client_config.heterlora_client_rank
+        common_config.our_total_rank = client_config.common_config.our_total_rank
+
+        common_config.fedadpter_width = client_config.common_config.fedadpter_width
+        common_config.fedadpter_depth = client_config.common_config.fedadpter_depth
+
+        common_config.enable_sys_heter = client_config.common_config.enable_sys_heter
+        common_config.test_target_matrix = client_config.common_config.test_target_matrix
+        memory = client_config.memory
+        
+        logger.info(f"memory capacity --> {memory} GiB")
+        
+        logger.info(f"worker current runing client is --> {client_config.client_idx}")
+
+
+        pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
+        from mymodels import CustomBERTModel
+        num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
+        model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
+
+        trainable = True
+        logger.info(f"common_config.enable_sys_heter --> {common_config.enable_sys_heter}")
+        if common_config.finetune_type == "fedft":
+            if common_config.enable_sys_heter and memory < 12:
+                # untrainable
+                trainable = False
+        elif common_config.finetune_type == "fedlora":
+            model = vallina_lora(model, depth=common_config.fedlora_depth, rank=common_config.fedlora_rank, alpha=common_config.fedlora_rank * 2, test_target_matrix= common_config.test_target_matrix)
+            if common_config.enable_sys_heter and memory < 6:
+                # untrainable
+                trainable = False
+        elif common_config.finetune_type == "fedadapter":
+            model = add_adapter(model, width=common_config.fedadpter_width, depth=common_config.fedadpter_depth)
+            if common_config.enable_sys_heter and memory < 6:
+                # untrainable
+                trainable = False
+        elif common_config.finetune_type == "our":
+            model = customized_lora(model,common_config.our_total_rank, memory)
+        elif common_config.finetune_type == "our_avg":
+            logger.info(f"common_config.our_total_rank = {common_config.our_total_rank}")
+            model = customized_lora_avg(model,common_config.our_total_rank, memory)
+        elif common_config.finetune_type == "heterlora":
+            logger.info(f"clint's heterlora_rank --> {common_config.client_rank}")
+            model = vallina_lora(model, rank=common_config.client_rank, alpha=common_config.client_rank * 2)
+            if common_config.enable_sys_heter and memory < 6:
+                # untrainable
+                trainable = False
+        else:
+            raise NotImplementedError
+        
+        
+        logger.info(f"Is this client trainable? --> {trainable}")
+
+        # heterlora truncate
+        if common_config.finetune_type == "heterlora":
+            logger.info("truncate tensors")
+            for layer, paras in common_config.para.items():
+                if "lora_A" in layer:
+                    # logger.info(f"before truncate {layer}, shape = {paras.shape}")
+                    common_config.para[layer] = paras[:common_config.client_rank, :]
+                    # logger.info(f"after truncate {layer}, shape = {paras.shape}")
+                if "lora_B" in layer:
+                    # logger.info(f"before truncate {layer}, shape = {paras.shape}")
+                    common_config.para[layer] = paras[:, : common_config.client_rank]
+                    # logger.info(f"after truncate {layer}, shape = {paras.shape}")
+
+        model.load_state_dict(common_config.para)
+
+        model.to(device)
+        # TODO:according to different method, set the trainable parameters of the model
+        
+        optimizer=torch.optim.SGD(model.parameters(),common_config.lr) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
+
+        logger.info(f"common_config.finetune_type --> {common_config.finetune_type}")
+
+        logger.info(f"Trainable parameters info --> ")
+        trainable_paras = 0
+        all_paras = 0
+        for layer, para in model.named_parameters():
+            all_paras += para.numel()
+            if para.requires_grad:
+                logger.info(f"{layer} --> para.shape = {para.shape}")
+                trainable_paras += para.numel()
+
+            if "out_layer" in layer:
+                logger.info(f"{layer} --> {para}")
+                trainable_paras += para.numel()
+        logger.info(f"Trainable paras: {trainable_paras}, all paras: {all_paras} ---> {trainable_paras / all_paras}")
+        
+        ########################################## init training and test set ##################################
+        train_dataset = client_config.source_train_dataset
+        test_dataset = client_config.test_dataset
+
+        logger.info(f"len(client_config.train_data_idxes) = {len(client_config.train_data_idxes)}")
+        tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
+        data_collator = DataCollatorWithPadding(tokenizer)
+        logger.info(f"client_config.train_data_idxes --> {client_config.train_data_idxes}")
+        train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes, collate_fn=data_collator)
+        test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False, collate_fn=data_collator)
+
+        ##################################################### Local Training ######################################
         # 开始本地训练
-        logger.info(f"##################### Round {common_config.tag} start ... #########################")
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         tasks = []
@@ -231,18 +247,18 @@ def main():
             asyncio.ensure_future(
                 # train_and_eval(config,model,train_loader,tokenizer, rank, logger)
                 # local_procedure(comm, common_config, config, model, train_loader, tokenizer, rank, logger)
-                ada_lora_fl(comm, common_config, model, optimizer, train_loader, len(client_config.train_data_idxes), test_loader, logger, trainable, memory)
+                ada_lora_fl(comm, common_config, model, optimizer, train_loader, len(client_config.train_data_idxes), test_loader, logger, trainable, memory, global_round)
             )
         )
         loop.run_until_complete(asyncio.wait(tasks))
 
         loop.close()
   
-        common_config.tag += 1
-        if common_config.tag==common_config.epoch+1:
+        global_round += 1
+        if global_round==common_config.epoch+1:
             break
 
-async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train_loader, num_train, test_loader, logger, trainable, memory):
+async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train_loader, num_train, test_loader, logger, trainable, memory, global_round):
     ######################### Trainer: local training ############################
     logger.info(f"the number of train data: {num_train}, batch size: {common_config.batch_size}")
 
@@ -352,26 +368,26 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
         # for layer, para in local_paras.items():
         #     logger.info(f"layer {layer}, shape = {para.shape}")
         
-        await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=common_config.tag)
-        logger.info("Waiting and Receiving aggregated paras from the server...")
-        received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=common_config.tag)
-        logger.info("Updating local model with the received paras...")
-        model_state_dict = model.state_dict()
-        # update paras
-            ## heterlora truncate
-        if common_config.finetune_type == "heterlora":
-            for layer, paras in received_paras.items():
-                if "lora_A" in layer:
-                    received_paras[layer] = paras[:common_config.client_rank, :]
-                if "lora_B" in layer:
-                    received_paras[layer] = paras[:, : common_config.client_rank]
+        await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=global_round)
+        # logger.info("Waiting and Receiving aggregated paras from the server...")
+        # received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=global_round)
+        # logger.info("Updating local model with the received paras...")
+        # model_state_dict = model.state_dict()
+        # # update paras
+        #     ## heterlora truncate
+        # if common_config.finetune_type == "heterlora":
+        #     for layer, paras in received_paras.items():
+        #         if "lora_A" in layer:
+        #             received_paras[layer] = paras[:common_config.client_rank, :]
+        #         if "lora_B" in layer:
+        #             received_paras[layer] = paras[:, : common_config.client_rank]
 
-        logger.info(f"recevied paras from server...")
-        for layer, paras in received_paras.items():
-            # logger.info(f"\t{layer} --> paras")
-            layer_trainable = model_state_dict[layer].requires_grad
-            model_state_dict[layer] = paras.to(device)
-            model_state_dict[layer].requires_grad = layer_trainable
+        # logger.info(f"recevied paras from server...")
+        # for layer, paras in received_paras.items():
+        #     # logger.info(f"\t{layer} --> paras")
+        #     layer_trainable = model_state_dict[layer].requires_grad
+        #     model_state_dict[layer] = paras.to(device)
+        #     model_state_dict[layer].requires_grad = layer_trainable
         # according to the resource constraint, update trainable paras
         # set_trainble_para(model, memory)
         # logger.info("local model after updating: ")
@@ -381,9 +397,9 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
     else:
         logger.info("Sending empty parameters to the server")
         local_paras = dict()
-        await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=common_config.tag)
+        await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=global_round)
         logger.info("Waiting and Receiving aggregated paras from the server...")
-        received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=common_config.tag)
+        received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=global_round)
         logger.info("Updating local model with the received paras...")
         model_state_dict = model.state_dict()
         # update paras
@@ -416,9 +432,9 @@ async def local_procedure(comm, common_config, config:BertForMRCConfig, model:Pe
         for layer, paras in model.named_parameters():
             if "lora" in layer:
                 local_paras[layer] = paras.clone().detach().to("cpu") # 都移动到cpu上方便聚合
-    await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=common_config.tag)
+    await send_data(comm=comm, data=local_paras, dst_rank=MASTER_RANK, tag_epoch=global_round)
     logger.info("Waiting and Receiving aggregated paras from the server...")
-    received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=common_config.tag)
+    received_paras = await get_data(comm=comm, src_rank=MASTER_RANK, tag_epoch=global_round)
     logger.info("Updating local model with the received paras...")
     model_state_dict = model.state_dict()
     for layer, paras in received_paras.items():

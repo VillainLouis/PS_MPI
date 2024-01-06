@@ -218,6 +218,11 @@ def main():
     # )
 
     # use alpha to control the overall data partition
+    edge = 67
+    nx = 67
+    agx = 66
+    client_num = 200
+
     if args.data_pattern != 0:
         logger.info("non-IID partition prepare... ")
         logger.info(f"alpha --> {alpha}")
@@ -228,7 +233,7 @@ def main():
                 label_map[int(train_dataset[idx]['label'])]
                 for idx in range(len(train_dataset))
             ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         
         elif args.dataset_type == "qnli" or args.dataset_type == "rte" or args.dataset_type == "wnli":    
@@ -238,7 +243,7 @@ def main():
                 label_map[int(train_dataset[idx]['label'])]
                 for idx in range(len(train_dataset))
             ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
 
         elif args.dataset_type == "mrpc":    
@@ -248,7 +253,7 @@ def main():
                 label_map[int(train_dataset[idx]['label'])]
                 for idx in range(len(train_dataset))
             ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
 
         elif args.dataset_type == "qqp":    
@@ -258,7 +263,7 @@ def main():
                 label_map[int(train_dataset[idx]['label'])]
                 for idx in range(len(train_dataset))
             ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         
         elif args.dataset_type == "mnli" or args.dataset_type == "mnli-mm":    
@@ -268,7 +273,7 @@ def main():
                 label_map[int(train_dataset[idx]['label'])]
                 for idx in range(len(train_dataset))
             ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
 
         elif args.dataset_type == "cola":    
@@ -278,13 +283,13 @@ def main():
                 label_map[int(train_dataset[idx]['label'])]
                 for idx in range(len(train_dataset))
             ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, worker_num, alpha, len(train_dataset), logger)
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         else:
             raise NotImplementedError
     else:
         logger.info("IID partition...")
-        train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/worker_num for _ in range(worker_num)])
+        train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/client_num for _ in range(client_num)])
     
     # train_data_partition = partition_data(common_config.dataset_type, common_config.data_pattern)
 
@@ -297,70 +302,13 @@ def main():
     #     size=worker_num, 
     #     p=memory_prop  
     # )
-    edge = 7
-    nx = 7
-    agx = 6
-    Jetson_num = edge + nx + agx
-    client_memory = [4 for _ in range(edge)] + [6 for _ in range(nx)] + [8 for _ in range(agx)]
-    random.shuffle(client_memory)
-    logger.info(f"client_memory --> {client_memory}")
-    for worker_idx, worker in enumerate(worker_list):
-        worker.config.para = global_model.state_dict()
-        if args.data_pattern != 0:
-            worker.config.train_data_idxes = train_data_partition[worker_idx]
-        else:
-            worker.config.train_data_idxes = train_data_partition.use(worker_idx)
-        worker.config.source_train_dataset = train_dataset
-        worker.config.test_dataset = test_dataset
-        worker.config.memory = client_memory[worker_idx]
-        if common_config.finetune_type == "heterlora":
-            worker.config.heterlora_client_rank = random.choice(powers_of_two)
-
-        # 根据设备的类型和方法，设置本地训练时间
-        
-        if common_config.dataset_type == "sst2":
-            if common_config.finetune_type == "fedft":
-                pass
-            elif common_config.finetune_type == "fedlora":
-                if worker.config.memory == 4:
-                    worker.config.local_training_time = 2.02
-                elif worker.config.memory == 6:
-                    worker.config.local_training_time = 1.09
-                elif worker.config.memory == 8:
-                    worker.config.local_training_time = 0.76
-            elif common_config.finetune_type == "fedadapter":
-                if worker.config.memory == 4:
-                    worker.config.local_training_time = 1.43
-                elif worker.config.memory == 6:
-                    worker.config.local_training_time = 0.78
-                elif worker.config.memory == 8:
-                    worker.config.local_training_time = 0.59
-            elif common_config.finetune_type == "our":
-                if worker.config.memory == 4:
-                    worker.config.local_training_time = 1.38
-                elif worker.config.memory == 6:
-                    worker.config.local_training_time = 0.79
-                elif worker.config.memory == 8:
-                    worker.config.local_training_time = 0.59
-            elif common_config.finetune_type == "our_avg":
-                if worker.config.memory == 4:
-                    pass
-                elif worker.config.memory == 6:
-                    pass
-                elif worker.config.memory == 8:
-                    pass
-            elif common_config.finetune_type == "heterlora":
-                if worker.config.memory == 4:
-                    worker.config.local_training_time = 2.02
-                elif worker.config.memory == 6:
-                    worker.config.local_training_time = 1.09
-                elif worker.config.memory == 8:
-                    worker.config.local_training_time = 0.76
-        # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
     
-    ###################### Sending init config to clients ###############################
-    logger.info(f"Sending init config to all clients and start the training procedure")
-    communication_parallel(worker_list, 1, comm, action="init")
+    all_client_memory = [4 for _ in range(edge)] + [6 for _ in range(nx)] + [8 for _ in range(agx)]
+    all_client_idxes = [i for i in range(len(all_client_memory))]
+    logger.info(f"all_client_idxes --> {all_client_idxes}")
+    clients_sample_count = [0 for i in range(len(all_client_idxes))]
+    random.shuffle(all_client_memory)
+    
 
     mu = 1 
     min_uploading_bandwidth = 1
@@ -371,13 +319,87 @@ def main():
     global_comm_cost = 0
     global_time = 0.0
 
-    # 下发模型
+    # 第一轮下发模型
     global_comm_cost += model_size * worker_num   
     global_time += model_size / downloading_bandwidth 
 
     max_acc = 0.0
     for epoch_idx in range(1, 1+common_config.epoch):
         logger.info(f"################## Round {epoch_idx} begin #####################")
+
+        # 1. 采样对应worker数量的clients，下发配置和模型参数（内存、训练数据idx）
+        sampled_clients_idxs = random.sample(all_client_idxes, worker_num)
+        logger.info(f"sampled_clients_idxs --> {sampled_clients_idxs}")
+        for idx in sampled_clients_idxs:
+            clients_sample_count[idx] += 1
+
+        for worker_idx, worker in enumerate(worker_list):
+            worker.config.para = global_model.state_dict()
+
+            # sample related
+            worker.config.client_idx = sampled_clients_idxs[worker_idx]
+            # logger.info(f"worker {worker_idx} has client {worker.config.client_idx}")
+            if args.data_pattern != 0:
+                worker.config.train_data_idxes = train_data_partition[worker.config.client_idx]
+            else:
+                worker.config.train_data_idxes = train_data_partition.use(worker.config.client_idx)
+            
+            
+            # logger.info(f"worker {worker_idx} training idxes: {worker.config.train_data_idxes}")
+            worker.config.source_train_dataset = train_dataset
+            worker.config.test_dataset = test_dataset
+            worker.config.memory = all_client_memory[worker.config.client_idx]
+            if common_config.finetune_type == "heterlora":
+                worker.config.heterlora_client_rank = random.choice(powers_of_two)
+
+            # 根据设备的类型和方法，设置本地训练时间
+            
+            if common_config.dataset_type == "sst2":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.02
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.09
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.76
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.43
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.78
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.59
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.38
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.79
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.59
+                elif common_config.finetune_type == "our_avg":
+                    if worker.config.memory == 4:
+                        pass
+                    elif worker.config.memory == 6:
+                        pass
+                    elif worker.config.memory == 8:
+                        pass
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.02
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.09
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.76
+            # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
+        
+        ###################### Sending init config to clients ###############################
+        logger.info(f"Sending config to all workers and start the training procedure")
+        communication_parallel(worker_list, 1, comm, action="init")
+
+
+
         logger.info("Waiting and receiving updated paras from clients")
         communication_parallel(worker_list, epoch_idx, comm, action="get_para")
         # 根据接收的参数，计算客户端发送的可训练参数的时间和服务器下发模型的时间，根据设备的类型得到本地计算时间
@@ -406,8 +428,8 @@ def main():
         logger.info("Clients' information received.")
         logger.info("Performing aggregation...")
         global_para = parameter_wise_aggregation(worker_list, common_config)
-        logger.info("Aggregation finished and sending the newly aggregated paras back to clients")
-        communication_parallel(worker_list, epoch_idx, comm, action="send_model",data=global_para)
+        # logger.info("Aggregation finished and sending the newly aggregated paras back to clients")
+        # communication_parallel(worker_list, epoch_idx, comm, action="send_model",data=global_para)
         logger.info(f"TEST on server...")
         # logger.info("The aggregated model is: ")
         # for layer, paras in global_model.named_parameters():

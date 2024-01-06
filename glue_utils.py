@@ -27,8 +27,9 @@ def get_metrics(task:str):
     "wnli": ["accuracy", None],
     }
     from evaluate import load
-    metric = load(task_to_metric[task][0])
-    metric_1 = load(task_to_metric[task][1]) if task_to_metric[task][1] else None
+    from datasets import load_metric
+    metric = load_metric(task_to_metric[task][0])
+    metric_1 = load_metric(task_to_metric[task][1]) if task_to_metric[task][1] else None
     return metric, metric_1
 
 def compute_metrics(predictions, references, metric):
