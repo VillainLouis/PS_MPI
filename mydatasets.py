@@ -7,7 +7,7 @@ from transformers.data.processors.squad import squad_convert_examples_to_feature
 import os
 import torch
 
-from transformers import BertTokenizer
+from transformers import BertTokenizer, AutoTokenizer
 
 def get_glue_dataset(task:str, model_checkpoint:str, split:str, dataloader_drop_last:bool=True, shuffle:bool=False,
                    batch_size:int=16, dataloader_num_workers:int=0, dataloader_pin_memory:bool=True) -> DataLoader:
@@ -43,11 +43,11 @@ def get_glue_dataset(task:str, model_checkpoint:str, split:str, dataloader_drop_
     def preprocess_function(examples):
         if sentence2_key is None:
             return tokenizer(examples[sentence1_key], truncation=True, padding=True)
-        return tokenizer(examples[sentence1_key], examples[sentence2_key], truncation=True, padding=True)
+        return tokenizer(examples[sentence1_key], examples[sentence2_key], truncation=True, max_length=512,  padding=True)
 
     from transformers import BertTokenizerFast
     from transformers.data.data_collator import DataCollatorWithPadding
-    tokenizer = BertTokenizerFast.from_pretrained(model_checkpoint, use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, use_fast=True)
     data_collator = DataCollatorWithPadding(tokenizer)
 
     from datasets import load_dataset

@@ -59,6 +59,8 @@ parser.add_argument("--enable_sys_heter", type=bool, default=False)
 
 parser.add_argument('--test_target_matrix', type=str, default=None)
 
+parser.add_argument('--client_num', type=int, default=200)
+
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
@@ -140,6 +142,7 @@ def main():
 
     
     logger.info(f"strategy --> {common_config.finetune_type}")
+
     if common_config.finetune_type == "fedft":
         pass
     elif common_config.finetune_type == "fedlora":
@@ -221,7 +224,7 @@ def main():
     edge = 67
     nx = 67
     agx = 66
-    client_num = 200
+    client_num = args.client_num
 
     if args.data_pattern != 0:
         logger.info("non-IID partition prepare... ")
@@ -380,11 +383,11 @@ def main():
                         worker.config.local_training_time = 0.59
                 elif common_config.finetune_type == "our_avg":
                     if worker.config.memory == 4:
-                        pass
+                        worker.config.local_training_time = 1.38
                     elif worker.config.memory == 6:
-                        pass
+                        worker.config.local_training_time = 0.79
                     elif worker.config.memory == 8:
-                        pass
+                        worker.config.local_training_time = 0.59
                 elif common_config.finetune_type == "heterlora":
                     if worker.config.memory == 4:
                         worker.config.local_training_time = 2.02
@@ -392,6 +395,42 @@ def main():
                         worker.config.local_training_time = 1.09
                     elif worker.config.memory == 8:
                         worker.config.local_training_time = 0.76
+
+            elif common_config.dataset_type == "qnli":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.99
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.54
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.38
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.67
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.38
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.27
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.69
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.39
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.30
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.99
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.54
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.38
+            else:
+                raise NotImplementedError
             # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
         
         ###################### Sending init config to clients ###############################

@@ -11,6 +11,10 @@ import torch.nn.functional as F
 from typing import Any, Dict, Union
 import loralib as lora
 
+from torch.nn import Sequential
+import copy
+
+
 def customized_lora(model, all_rank, memory):
     def findMaxLowerPowerOf2(n):
         power = math.floor(math.log2(n))
@@ -52,8 +56,15 @@ def customized_lora(model, all_rank, memory):
     last_layer_idx = 11
     for idx, r in enumerate(ranks):
         layer_rank[str(last_layer_idx - idx)] = r
-        target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
-        target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+        if "deberta" in model._modules["base_model"].config.name_or_path:
+            target_attn_matrix[str(last_layer_idx - idx)] = ["query_proj", "key_proj", "value_proj", "output"]
+            target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+        elif "bert" in model._modules["base_model"].config.name_or_path:
+            target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
+            target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+        elif "tiny-llama" in model._modules["base_model"].config.name_or_path:
+            target_attn_matrix[str(last_layer_idx - idx)] = ["q_proj", "k_proj", "v_proj", "o_proj"]
+            target_ffn_matrix[str(last_layer_idx - idx)] = ["up_proj", "down_proj"]
 
     only_lora_B = False
     for layer in target_attn_matrix.keys():
@@ -61,35 +72,81 @@ def customized_lora(model, all_rank, memory):
             rank = layer_rank[layer]
             alpha = 2 * rank
             # set attention.output
-            if matrix == "output":
-                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+            if "deberta" in model._modules["base_model"].config.name_or_path:
+                if matrix == "output":
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
+                else:
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+            elif "bert" in model._modules["base_model"].config.name_or_path:
+                if matrix == "output":
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
+                else:
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+            
+            elif "tiny-llama" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["layers"]._modules[layer]._modules["self_attn"]._modules[matrix]
                 lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
                 if only_lora_B:
                     lora_layer.lora_A.requires_grad = False
                 lora_layer.weight = module.weight
                 lora_layer.bias = module.bias
-                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
-            else:
-                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
-                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
-                if only_lora_B:
-                    lora_layer.lora_A.requires_grad = False
-                lora_layer.weight = module.weight
-                lora_layer.bias = module.bias
-                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+                model._modules["base_model"]._modules["layers"]._modules[layer]._modules["self_attn"]._modules[matrix] = lora_layer
             
 
     for layer in target_ffn_matrix.keys():
         for matrix in target_ffn_matrix[layer]:
             rank = layer_rank[layer]
-            module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
-            lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
-            if only_lora_B:
-                lora_layer.lora_A.requires_grad = False
-            lora_layer.weight = module.weight
-            lora_layer.bias = module.bias
-            model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+            if "deberta" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+            elif "bert" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+            
+            elif "tiny-llama" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["layers"]._modules[layer]._modules["mlp"]._modules[matrix]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["base_model"]._modules["layers"]._modules[layer]._modules["mlp"]._modules[matrix] = lora_layer
     lora.mark_only_lora_as_trainable(model)
+
     
     return set_trainble_para(model, memory)
 
@@ -248,15 +305,19 @@ def add_adapter(model, width = 32, depth = 12):
         
     layers = [str(l) for l in range(11, 11 - depth, -1)]
     for layer in layers:
-        origin_layer = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["output"]._modules["LayerNorm"]
-        from torch.nn import Sequential
-        import copy
-        new_layer = Sequential()
-        new_layer.add_module(layer, copy.deepcopy(origin_layer))
-        adapter = Adapter(input_dim=768, bottleneck_dim=width)
-        new_layer.add_module('adapter', adapter)
+        if "deberta" in model._modules["base_model"].config.name_or_path:
+            raise NotImplementedError
+        elif "bert" in model._modules["base_model"].config.name_or_path:
+            origin_layer = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["output"]._modules["LayerNorm"]
+            new_layer = Sequential()
+            new_layer.add_module(layer, copy.deepcopy(origin_layer))
+            adapter = Adapter(input_dim=768, bottleneck_dim=width)
+            new_layer.add_module('adapter', adapter)
 
-        model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["output"]._modules["LayerNorm"] = new_layer
+            model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["output"]._modules["LayerNorm"] = new_layer
+        elif "tiny-llama" in model._modules["base_model"].config.name_or_path:
+            raise NotImplementedError
+        
 
     make_only_adapter_trainable(model)
     # 设置head可训练
@@ -274,12 +335,20 @@ def vallina_lora(model, depth = 12, rank = 8, alpha = 32, test_target_matrix=Non
     target_attn_matrix = dict()
     target_ffn_matrix = dict()
 
-    last_layer_idx = 11
+    last_layer_idx = depth - 1
     if test_target_matrix is None:
         for idx, r in enumerate(ranks):
             layer_rank[str(last_layer_idx - idx)] = r
-            target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
-            target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+            if "deberta" in model._modules["base_model"].config.name_or_path:
+                target_attn_matrix[str(last_layer_idx - idx)] = ["query_proj", "key_proj", "value_proj", "output"]
+                target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+            elif "bert" in model._modules["base_model"].config.name_or_path:
+                target_attn_matrix[str(last_layer_idx - idx)] = ["query", "key", "value", "output"]
+                target_ffn_matrix[str(last_layer_idx - idx)] = ["intermediate", "output"]
+            elif "tiny-llama" in model._modules["base_model"].config.name_or_path:
+                target_attn_matrix[str(last_layer_idx - idx)] = ["q_proj", "k_proj", "v_proj", "o_proj"]
+                target_ffn_matrix[str(last_layer_idx - idx)] = ["up_proj", "down_proj"]
+            
     else:
         for idx, r in enumerate(ranks):
             layer_rank[str(last_layer_idx - idx)] = r
@@ -300,34 +369,79 @@ def vallina_lora(model, depth = 12, rank = 8, alpha = 32, test_target_matrix=Non
             rank = layer_rank[layer]
             alpha = 2 * rank
             # set attention.output
-            if matrix == "output":
-                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+            if "deberta" in model._modules["base_model"].config.name_or_path:
+                if matrix == "output":
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
+                else:
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+            elif "bert" in model._modules["base_model"].config.name_or_path:
+                if matrix == "output":
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
+                else:
+                    module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
+                    lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                    if only_lora_B:
+                        lora_layer.lora_A.requires_grad = False
+                    lora_layer.weight = module.weight
+                    lora_layer.bias = module.bias
+                    model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+            
+            elif "tiny-llama" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["layers"]._modules[layer]._modules["self_attn"]._modules[matrix]
                 lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
                 if only_lora_B:
                     lora_layer.lora_A.requires_grad = False
                 lora_layer.weight = module.weight
                 lora_layer.bias = module.bias
-                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules[matrix]._modules["dense"] = lora_layer
-            else:
-                module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix]
-                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
-                if only_lora_B:
-                    lora_layer.lora_A.requires_grad = False
-                lora_layer.weight = module.weight
-                lora_layer.bias = module.bias
-                model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules["attention"]._modules["self"]._modules[matrix] = lora_layer
+                model._modules["base_model"]._modules["layers"]._modules[layer]._modules["self_attn"]._modules[matrix] = lora_layer
             
 
     for layer in target_ffn_matrix.keys():
         for matrix in target_ffn_matrix[layer]:
             rank = layer_rank[layer]
-            module = model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
-            lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
-            if only_lora_B:
-                lora_layer.lora_A.requires_grad = False
-            lora_layer.weight = module.weight
-            lora_layer.bias = module.bias
-            model._modules["bert"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+            if "deberta" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+            elif "bert" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["base_model"]._modules["encoder"]._modules["layer"]._modules[layer]._modules[matrix]._modules["dense"] = lora_layer
+            
+            elif "tiny-llama" in model._modules["base_model"].config.name_or_path:
+                module = model._modules["base_model"]._modules["layers"]._modules[layer]._modules["mlp"]._modules[matrix]
+                lora_layer = lora.Linear(in_features=module.in_features, out_features=module.out_features, r=rank, lora_alpha=alpha)
+                if only_lora_B:
+                    lora_layer.lora_A.requires_grad = False
+                lora_layer.weight = module.weight
+                lora_layer.bias = module.bias
+                model._modules["base_model"]._modules["layers"]._modules[layer]._modules["mlp"]._modules[matrix] = lora_layer
     lora.mark_only_lora_as_trainable(model)
 
     # 设置head可训练
