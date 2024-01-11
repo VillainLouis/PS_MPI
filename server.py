@@ -357,7 +357,7 @@ def main():
 
             # 根据设备的类型和方法，设置本地训练时间
             
-            if common_config.dataset_type == "sst2":
+            if "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "sst2":
                 if common_config.finetune_type == "fedft":
                     pass
                 elif common_config.finetune_type == "fedlora":
@@ -396,7 +396,7 @@ def main():
                     elif worker.config.memory == 8:
                         worker.config.local_training_time = 0.76
 
-            elif common_config.dataset_type == "qnli":
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "qnli":
                 if common_config.finetune_type == "fedft":
                     pass
                 elif common_config.finetune_type == "fedlora":
@@ -429,6 +429,173 @@ def main():
                         worker.config.local_training_time = 0.54
                     elif worker.config.memory == 8:
                         worker.config.local_training_time = 0.38
+
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "rte":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.34
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.73
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.5
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.93
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.53
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.39
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.92
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.53
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.4
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.34
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.73
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.5
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "mrpc":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.95
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.57
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.39
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.68
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.42
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.29
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.67
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.4
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.3
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.95
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.57
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.39
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "cola":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.22
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.68
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.47
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.84
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.49
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.34
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.85
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.49
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.37
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.22
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.68
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.47
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "qqp":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.81
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.41
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.28
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.46
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.31
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.21
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.45
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.29
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.21
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 0.81
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.41
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.28
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "mnli":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.09
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.1
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.74
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.38
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.64
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.42
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.24
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.66
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.45
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.09
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.1
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.74
+            
             else:
                 raise NotImplementedError
             # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
