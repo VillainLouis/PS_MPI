@@ -137,7 +137,10 @@ def main():
     # global_model = SST(pretrained_model_path)
     from mymodels import CustomBERTModel
     logger.info(f"\nLoading pre-trained BERT model \"{pretrained_model_path}\"")
-    num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
+    if common_config.dataset_type == "ag_news":
+        num_labels = 4
+    else:
+        num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
     global_model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
 
     
@@ -198,10 +201,14 @@ def main():
     # train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
     partitial_data = args.partitial_data
     logger.info(f"totoal dataset: {partitial_data * 100}% {common_config.dataset_type}")
-    if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli"]:
+    if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli", "ag_news"]:
         from mydatasets import get_glue_dataset
         train_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "train", batch_size=common_config.batch_size)
-        test_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "validation", batch_size=common_config.batch_size)
+        if common_config.dataset_type == "ag_news":
+            test_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "test", batch_size=common_config.batch_size)
+        else:
+            test_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "validation", batch_size=common_config.batch_size)
+        
         from torch.utils.data import Subset
         train_dataset = Subset(train_dataset, range(int(partitial_data * len(train_dataset))))
         from transformers import BertTokenizerFast
@@ -221,9 +228,7 @@ def main():
     # )
 
     # use alpha to control the overall data partition
-    edge = 67
-    nx = 67
-    agx = 66
+
     client_num = args.client_num
 
     if args.data_pattern != 0:
@@ -305,6 +310,10 @@ def main():
     #     size=worker_num, 
     #     p=memory_prop  
     # )
+    edge = client_num // 3 + (1 if client_num % 3 != 0 else 0)
+    nx = client_num // 3
+    agx = client_num // 3
+    logger.info(f"edge num --> {edge}, nx num --> {nx}, agx num --> {agx}")
     
     all_client_memory = [4 for _ in range(edge)] + [6 for _ in range(nx)] + [8 for _ in range(agx)]
     all_client_idxes = [i for i in range(len(all_client_memory))]

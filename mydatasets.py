@@ -36,6 +36,7 @@ def get_glue_dataset(task:str, model_checkpoint:str, split:str, dataloader_drop_
     "sst2": ("sentence", None),
     "stsb": ("sentence1", "sentence2"),
     "wnli": ("sentence1", "sentence2"),
+    "ag_news": ("text", None),
     }
 
     sentence1_key, sentence2_key = task_to_keys[task]
@@ -52,7 +53,11 @@ def get_glue_dataset(task:str, model_checkpoint:str, split:str, dataloader_drop_
 
     from datasets import load_dataset
     actual_task = "mnli" if task == "mnli-mm" else task
-    dataset = load_dataset("glue", actual_task)
+    if task == "ag_news":
+        dataset = dataset = load_dataset("ag_news")
+    else:
+        dataset = load_dataset("glue", actual_task)
+        
     encoded_dataset = dataset.map(preprocess_function, batched=True)
     
     columns_to_return = ['input_ids', 'label', 'attention_mask']
