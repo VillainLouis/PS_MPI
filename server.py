@@ -20,6 +20,8 @@ import random
 from noniid_label import label_skew_process
 from glue_utils import prepare_inputs
 
+import platform
+
 import math
 
 #init parameters
@@ -130,7 +132,11 @@ def main():
 
     logger.info(f"learning rate: {common_config.lr}")
     ###################################### init config #############################################
-    pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
+    hostname = platform.node() 
+    if "407" in hostname:
+        pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
+    elif "406" in hostname:
+        pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
 
     ###################################### init model ###############################################
     # from mymodels import SST
@@ -604,7 +610,39 @@ def main():
                         worker.config.local_training_time = 1.1
                     elif worker.config.memory == 8:
                         worker.config.local_training_time = 0.74
-            
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "ag_news":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.09
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.1
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.74
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.38
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.64
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.42
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.24
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.66
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.45
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.09
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.1
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.74
             else:
                 raise NotImplementedError
             # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
@@ -655,7 +693,7 @@ def main():
         global_model.to("cuda:0")
         global_model.eval()
         
-        if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli"]:
+        if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli", "ag_news"]:
              # evaluation
             iterator = iter(test_loader)
             trange = range(len(test_loader))

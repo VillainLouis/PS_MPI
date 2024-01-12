@@ -32,6 +32,7 @@ from glue_utils import prepare_inputs
 from transformers import BertTokenizerFast
 from transformers.data.data_collator import DataCollatorWithPadding
 
+import platform
 
 parser = argparse.ArgumentParser(description='Distributed Client')
 parser.add_argument('--visible_cuda', type=str, default='-1')
@@ -91,7 +92,11 @@ def main():
     # batch_size = 32
     # train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
     # test_loader=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
-    
+    hostname = platform.node() 
+    if "407" in hostname:
+        pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
+    elif "406" in hostname:
+        pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
 
     while True:
         ## 接收client的配置和最新的全局模型
@@ -152,9 +157,11 @@ def main():
         logger.info(f"worker current runing client is --> {client_config.client_idx}")
 
 
-        pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
         from mymodels import CustomBERTModel
-        num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
+        if common_config.dataset_type == "ag_news":
+            num_labels = 4
+        else:
+            num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
         model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
 
         trainable = True
