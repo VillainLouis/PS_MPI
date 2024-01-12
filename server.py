@@ -299,6 +299,15 @@ def main():
             ])
             train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
             train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+        elif args.dataset_type == "ag_news":    
+            label_vocab = {'World': 0, 'Sports': 1, 'Business': 2, 'Sci/Tech': 3}
+            label_map = {0 : 'World', 1 : 'Sports', 2 : 'Business', 3 : 'Sci/Tech'}
+            label_assignment_train = np.array([
+                label_map[int(train_dataset[idx]['label'])]
+                for idx in range(len(train_dataset))
+            ])
+            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
+            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         else:
             raise NotImplementedError
     else:
@@ -615,34 +624,34 @@ def main():
                     pass
                 elif common_config.finetune_type == "fedlora":
                     if worker.config.memory == 4:
-                        worker.config.local_training_time = 2.09
+                        worker.config.local_training_time = 3.42
                     elif worker.config.memory == 6:
-                        worker.config.local_training_time = 1.1
+                        worker.config.local_training_time = 1.84
                     elif worker.config.memory == 8:
-                        worker.config.local_training_time = 0.74
+                        worker.config.local_training_time = 1.18
                 elif common_config.finetune_type == "fedadapter":
                     if worker.config.memory == 4:
-                        worker.config.local_training_time = 1.38
+                        worker.config.local_training_time = 2.47
                     elif worker.config.memory == 6:
-                        worker.config.local_training_time = 0.64
+                        worker.config.local_training_time = 1.27
                     elif worker.config.memory == 8:
-                        worker.config.local_training_time = 0.42
+                        worker.config.local_training_time = 0.85
                 elif common_config.finetune_type == "our":
                     if worker.config.memory == 4:
-                        worker.config.local_training_time = 1.24
+                        worker.config.local_training_time = 2.33
                     elif worker.config.memory == 6:
-                        worker.config.local_training_time = 0.66
+                        worker.config.local_training_time = 1.31
                     elif worker.config.memory == 8:
-                        worker.config.local_training_time = 0.45
+                        worker.config.local_training_time = 0.86
                 elif common_config.finetune_type == "our_avg":
                     raise NotImplementedError
                 elif common_config.finetune_type == "heterlora":
                     if worker.config.memory == 4:
-                        worker.config.local_training_time = 2.09
+                        worker.config.local_training_time = 3.42
                     elif worker.config.memory == 6:
-                        worker.config.local_training_time = 1.1
+                        worker.config.local_training_time = 1.84
                     elif worker.config.memory == 8:
-                        worker.config.local_training_time = 0.74
+                        worker.config.local_training_time = 1.18
             else:
                 raise NotImplementedError
             # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
