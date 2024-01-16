@@ -92,6 +92,9 @@ class ClientConfig:
 
         self.client_idx = None
 
+        # 用来实现本地steps的变量，配合server的cnt计数使用，client先跳过之前训练的数据
+        self.cur_steps = None
+
 
 class BertForMRCConfig(object):
     def __init__(self):

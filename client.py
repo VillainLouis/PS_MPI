@@ -41,6 +41,8 @@ parser.add_argument('--use_cuda', action="store_false", default=True)
 parser.add_argument('--fune_type', type=str, choices=["FT", "FLoRA_QKV", "PLoRA_QKV"])
 parser.add_argument('--local_step', type=int, default=-1)
 
+parser.add_argument('--optimizer', type=str, default="SGD")
+
 args = parser.parse_args()
 
 comm = MPI.COMM_WORLD
@@ -152,10 +154,15 @@ def main():
         common_config.test_target_matrix = client_config.common_config.test_target_matrix
         memory = client_config.memory
         
+        local_steps = client_config.local_steps
+        cur_steps = client_config.cur_steps
+
         logger.info(f"memory capacity --> {memory} GiB")
         
         logger.info(f"worker current runing client is --> {client_config.client_idx}")
-
+        
+        logger.info(f"client {client_config.client_idx} cur steps = {cur_steps} and local step is {local_steps}")
+        
 
         from mymodels import CustomBERTModel
         if common_config.dataset_type == "ag_news":
@@ -215,7 +222,14 @@ def main():
         model.to(device)
         # TODO:according to different method, set the trainable parameters of the model
         
-        optimizer=torch.optim.SGD(model.parameters(),common_config.lr) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
+        if args.optimizer == "SGD":
+            optimizer=torch.optim.SGD(model.parameters(),common_config.lr) # 2e-5 92.5；3e-5 91.5; 4e-5 91.1; 5e-5 90.5
+        elif args.optimizer == "Adam":
+            optimizer=torch.optim.Adam(model.parameters(),common_config.lr)
+        elif args.optimizer == "AdamW":
+            optimizer=torch.optim.AdamW(model.parameters(),common_config.lr)
+        else:
+            raise NotImplementedError
 
         logger.info(f"common_config.finetune_type --> {common_config.finetune_type}")
 
@@ -241,7 +255,7 @@ def main():
         tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
         data_collator = DataCollatorWithPadding(tokenizer)
         logger.info(f"client_config.train_data_idxes --> {client_config.train_data_idxes}")
-        train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes, collate_fn=data_collator)
+        train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, shuffle=False, selected_idxs=client_config.train_data_idxes, collate_fn=data_collator)
         test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False, collate_fn=data_collator)
 
         ##################################################### Local Training ######################################
@@ -254,7 +268,7 @@ def main():
             asyncio.ensure_future(
                 # train_and_eval(config,model,train_loader,tokenizer, rank, logger)
                 # local_procedure(comm, common_config, config, model, train_loader, tokenizer, rank, logger)
-                ada_lora_fl(comm, common_config, model, optimizer, train_loader, len(client_config.train_data_idxes), test_loader, logger, trainable, memory, global_round)
+                ada_lora_fl(comm, common_config, model, optimizer, train_loader, len(client_config.train_data_idxes), test_loader, logger, trainable, memory, global_round, local_steps, cur_steps)
             )
         )
         loop.run_until_complete(asyncio.wait(tasks))
@@ -265,7 +279,7 @@ def main():
         if global_round==common_config.epoch+1:
             break
 
-async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train_loader, num_train, test_loader, logger, trainable, memory, global_round):
+async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train_loader, num_train, test_loader, logger, trainable, memory, global_round, local_steps, cur_steps):
     ######################### Trainer: local training ############################
     logger.info(f"the number of train data: {num_train}, batch size: {common_config.batch_size}")
 
@@ -296,11 +310,17 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
     ##########################
     logger.info(f"trainbale: {trainable}")
     if trainable:
-        # TODO: set local step
-        local_steps = int(num_train / common_config.batch_size)
         logger.info(f"local steps --> {local_steps}")
         # Training
         iterator = iter(train_loader)
+        # 先跳过之前记录的位置
+        for step in range(cur_steps):
+            try:
+                next_data = next(iterator)
+            except StopIteration:
+                iterator = iter(train_loader)
+                next_data = next(iterator)
+        # 再开始训练
         model.train()
         loss_all=[]
         metric_name = model.metric.name
@@ -320,13 +340,13 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
             if model.metric_1 is not None: 
                 metric_1_all.append(step_metric_1[model.metric_1.name])
 
-        # logger.info(f"train loss --> {mean(loss_all)}")
-        # logger.info(f"train {metric_name} --> {mean(metric_all)} ")
-        # if model.metric_1 is not None:
-        #     logger.info(f"train {metric_1_name} -->  {mean(metric_1_all)}")
+        logger.info(f"train loss --> {mean(loss_all)}")
+        logger.info(f"train {metric_name} --> {mean(metric_all)} ")
+        if model.metric_1 is not None:
+            logger.info(f"train {metric_1_name} -->  {mean(metric_1_all)}")
             
         # evaluation
-        iterator = iter(test_loader)
+        test_iterator = iter(test_loader)
         trange = range(len(test_loader))
         model.eval()
         loss_all=[]
@@ -335,7 +355,7 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
         metric_all=[]
         metric_1_all = []
         for step in trange:
-            inputs = prepare_inputs(next(iterator), device)
+            inputs = prepare_inputs(next(test_iterator), device)
             step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
             loss_all.append(step_loss.item())
             metric_all.append(step_metric[model.metric.name])

@@ -63,6 +63,8 @@ parser.add_argument('--test_target_matrix', type=str, default=None)
 
 parser.add_argument('--client_num', type=int, default=200)
 
+parser.add_argument('--local_steps', type=int, default=20)
+
 args = parser.parse_args()
 device = torch.device("cuda" if args.use_cuda and torch.cuda.is_available() else "cpu")
 
@@ -200,6 +202,9 @@ def main():
         worker_list.append(
             Worker(config=ClientConfig(common_config=common_config),rank=worker_idx+1)
         )
+        worker_list[-1].config.local_steps = args.local_steps
+
+
     #到了这里，worker已经启动了
 
     ###################################### init server side dataset (train, test) and set data partition ####################################
@@ -357,11 +362,11 @@ def main():
         # 1. 采样对应worker数量的clients，下发配置和模型参数（内存、训练数据idx）
         sampled_clients_idxs = random.sample(all_client_idxes, worker_num)
         logger.info(f"sampled_clients_idxs --> {sampled_clients_idxs}")
-        for idx in sampled_clients_idxs:
-            clients_sample_count[idx] += 1
 
         for worker_idx, worker in enumerate(worker_list):
             worker.config.para = global_model.state_dict()
+            
+            
 
             # sample related
             worker.config.client_idx = sampled_clients_idxs[worker_idx]
@@ -371,6 +376,8 @@ def main():
             else:
                 worker.config.train_data_idxes = train_data_partition.use(worker.config.client_idx)
             
+            
+            worker.config.cur_steps = int((clients_sample_count[worker.config.client_idx] * args.local_steps) % (len(worker.config.train_data_idxes) / common_config.batch_size))
             
             # logger.info(f"worker {worker_idx} training idxes: {worker.config.train_data_idxes}")
             worker.config.source_train_dataset = train_dataset
@@ -660,7 +667,9 @@ def main():
         logger.info(f"Sending config to all workers and start the training procedure")
         communication_parallel(worker_list, 1, comm, action="init")
 
-
+        # 计数每个client参与训练的次数，方便记录本地数据进度
+        for idx in sampled_clients_idxs:
+            clients_sample_count[idx] += 1
 
         logger.info("Waiting and receiving updated paras from clients")
         communication_parallel(worker_list, epoch_idx, comm, action="get_para")
@@ -677,7 +686,8 @@ def main():
                 uploading_bandwidth = np.random.normal(mu, sigma, 1)
                 uploading_bandwidth = np.clip(uploading_bandwidth, min_uploading_bandwidth, max_uploading_bandwidth)[0]
                 client_uploading_time = clinet_uploaded_para_size / uploading_bandwidth
-                client_local_training_time = worker_list[worker_idx].config.local_training_time * (len(worker.config.train_data_idxes) / common_config.batch_size)
+                # client_local_training_time = worker_list[worker_idx].config.local_training_time * (len(worker.config.train_data_idxes) / common_config.batch_size)
+                client_local_training_time = worker_list[worker_idx].config.local_training_time * worker_list[worker_idx].config.local_steps
                 current_round_time = max(current_round_time, client_uploading_time + client_local_training_time)
         logger.info(f"current round time (local training + uploading) --> {current_round_time}")
         ## 模型上传和训练时间的最大值，加上下发模型参数的时间
