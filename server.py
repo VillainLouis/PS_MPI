@@ -145,6 +145,8 @@ def main():
     logger.info(f"\nLoading pre-trained BERT model \"{pretrained_model_path}\"")
     if common_config.dataset_type == "ag_news":
         num_labels = 4
+    elif common_config.dataset_type == "20news":
+        num_labels = 20
     else:
         num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
     global_model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
@@ -207,10 +209,10 @@ def main():
     # train_dataset, test_dataset = mydatasets.load_datasets(common_config.dataset_type)
     partitial_data = args.partitial_data
     logger.info(f"totoal dataset: {partitial_data * 100}% {common_config.dataset_type}")
-    if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli", "ag_news"]:
+    if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli", "ag_news", "20news"]:
         from mydatasets import get_glue_dataset
         train_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "train", batch_size=common_config.batch_size)
-        if common_config.dataset_type == "ag_news":
+        if common_config.dataset_type in ["ag_news", "20news"]:
             test_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "test", batch_size=common_config.batch_size)
         else:
             test_dataset = get_glue_dataset(common_config.dataset_type, pretrained_model_path, "validation", batch_size=common_config.batch_size)
@@ -243,73 +245,86 @@ def main():
         if args.dataset_type == "sst2":    
             label_vocab = {'negative': 0, 'positive': 1}
             label_map = {0 : 'negative', 1 : 'positive'}
-            label_assignment_train = np.array([
-                label_map[int(train_dataset[idx]['label'])]
-                for idx in range(len(train_dataset))
-            ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
-            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         
         elif args.dataset_type == "qnli" or args.dataset_type == "rte" or args.dataset_type == "wnli":    
             label_vocab = {'entailment': 0, 'not_entailment': 1}
             label_map = {0 : 'entailment', 1 : 'not_entailment'}
-            label_assignment_train = np.array([
-                label_map[int(train_dataset[idx]['label'])]
-                for idx in range(len(train_dataset))
-            ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
-            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
 
         elif args.dataset_type == "mrpc":    
             label_vocab = {'not_equivalent': 0, 'equivalent': 1}
             label_map = {0 : 'not_equivalent', 1 : 'equivalent'}
-            label_assignment_train = np.array([
-                label_map[int(train_dataset[idx]['label'])]
-                for idx in range(len(train_dataset))
-            ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
-            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
 
         elif args.dataset_type == "qqp":    
             label_vocab = {'not_duplicate': 0, 'duplicate': 1}
             label_map = {0 : 'not_duplicate', 1 : 'duplicate'}
-            label_assignment_train = np.array([
-                label_map[int(train_dataset[idx]['label'])]
-                for idx in range(len(train_dataset))
-            ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
-            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
         
         elif args.dataset_type == "mnli" or args.dataset_type == "mnli-mm":    
             label_vocab = {'entailment': 0, 'neutral': 1, "contradiction": 2}
             label_map = {0 : 'entailment', 1 : 'neutral', 2: "contradiction" }
-            label_assignment_train = np.array([
-                label_map[int(train_dataset[idx]['label'])]
-                for idx in range(len(train_dataset))
-            ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
-            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
 
         elif args.dataset_type == "cola":    
             label_vocab = {'unacceptable': 0, 'acceptable': 1}
             label_map = {0 : 'unacceptable', 1 : 'acceptable'}
-            label_assignment_train = np.array([
-                label_map[int(train_dataset[idx]['label'])]
-                for idx in range(len(train_dataset))
-            ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
-            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+
         elif args.dataset_type == "ag_news":    
             label_vocab = {'World': 0, 'Sports': 1, 'Business': 2, 'Sci/Tech': 3}
             label_map = {0 : 'World', 1 : 'Sports', 2 : 'Business', 3 : 'Sci/Tech'}
-            label_assignment_train = np.array([
-                label_map[int(train_dataset[idx]['label'])]
-                for idx in range(len(train_dataset))
-            ])
-            train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
-            train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
+
+        elif args.dataset_type == "20news":
+            label_vocab = {
+                            'alt.atheism': 0,
+                            'comp.graphics': 1,
+                            'comp.os.ms-windows.misc': 2,  
+                            'comp.sys.ibm.pc.hardware': 3,
+                            'comp.sys.mac.hardware': 4,
+                            'comp.windows.x': 5,
+                            'misc.forsale': 6,
+                            'rec.autos': 7, 
+                            'rec.motorcycles': 8,
+                            'rec.sport.baseball': 9,
+                            'rec.sport.hockey': 10,
+                            'sci.crypt': 11,
+                            'sci.electronics': 12,
+                            'sci.med': 13,
+                            'sci.space': 14,
+                            'soc.religion.christian': 15,
+                            'talk.politics.guns': 16,  
+                            'talk.politics.mideast': 17,
+                            'talk.politics.misc': 18,
+                            'talk.religion.misc': 19
+                            }
+            label_map = {
+                        0: 'alt.atheism',
+                        1: 'comp.graphics',
+                        2: 'comp.os.ms-windows.misc',
+                        3: 'comp.sys.ibm.pc.hardware',  
+                        4: 'comp.sys.mac.hardware',
+                        5: 'comp.windows.x',
+                        6: 'misc.forsale',
+                        7: 'rec.autos',
+                        8: 'rec.motorcycles',
+                        9: 'rec.sport.baseball',
+                        10: 'rec.sport.hockey',
+                        11: 'sci.crypt',
+                        12: 'sci.electronics',
+                        13: 'sci.med',
+                        14: 'sci.space',
+                        15: 'soc.religion.christian',
+                        16: 'talk.politics.guns',
+                        17: 'talk.politics.mideast',  
+                        18: 'talk.politics.misc',
+                        19: 'talk.religion.misc'
+                        }
+        
         else:
             raise NotImplementedError
+        
+        label_assignment_train = np.array([
+            label_map[int(train_dataset[idx]['label'])]
+            for idx in range(len(train_dataset))
+        ])
+        train_data_partition = label_skew_process(label_vocab, label_assignment_train, client_num, alpha, len(train_dataset), logger)
+        train_data_partition = [[int(train_data_partition[x][y]) for y in range(len(train_data_partition[x]))] for x in range(len(train_data_partition))]
     else:
         logger.info("IID partition...")
         train_data_partition = RandomPartitioner(data_len=len(train_dataset), partition_sizes=[1/client_num for _ in range(client_num)])
@@ -652,6 +667,39 @@ def main():
                         worker.config.local_training_time = 1.84
                     elif worker.config.memory == 8:
                         worker.config.local_training_time = 1.18
+            elif "bert-base-uncased" in pretrained_model_path and common_config.dataset_type == "20news":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 3.17
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.46
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.95
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.92
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.02
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.72
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.85
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.04
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.71
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 3.17
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.46
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.95
             else:
                 raise NotImplementedError
             # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
@@ -702,7 +750,7 @@ def main():
         global_model.to("cuda:0")
         global_model.eval()
         
-        if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli", "ag_news"]:
+        if common_config.dataset_type in [ "cola", "mnli", "mnli-mm", "mrpc", "qnli", "qqp", "rte", "sst2",  "stsb", "wnli", "ag_news", "20news"]:
              # evaluation
             iterator = iter(test_loader)
             trange = range(len(test_loader))

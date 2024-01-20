@@ -160,6 +160,8 @@ def main():
         from mymodels import CustomBERTModel
         if common_config.dataset_type == "ag_news":
             num_labels = 4
+        elif common_config.dataset_type == "20news":
+            num_labels = 20
         else:
             num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
         model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
