@@ -92,11 +92,6 @@ def main():
     # batch_size = 32
     # train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
     # test_loader=torch.utils.data.DataLoader(test_dataset,batch_size=batch_size,shuffle=False)
-    hostname = platform.node() 
-    if "407" in hostname:
-        pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
-    elif "406" in hostname:
-        pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
 
     while True:
         ## 接收client的配置和最新的全局模型
@@ -150,8 +145,11 @@ def main():
 
         common_config.enable_sys_heter = client_config.common_config.enable_sys_heter
         common_config.test_target_matrix = client_config.common_config.test_target_matrix
+        common_config.pretrained_model_path = client_config.common_config.pretrained_model_path
         memory = client_config.memory
         
+        pretrained_model_path = common_config.pretrained_model_path
+
         logger.info(f"memory capacity --> {memory} GiB")
         
         logger.info(f"worker current runing client is --> {client_config.client_idx}")

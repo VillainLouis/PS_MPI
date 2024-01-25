@@ -133,11 +133,18 @@ def main():
     logger.info(f"learning rate: {common_config.lr}")
     ###################################### init config #############################################
     hostname = platform.node() 
-    if "407" in hostname:
-        pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
-    elif "406" in hostname:
-        pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
+    if args.model_type == "Bert":
+        if "407" in hostname:
+            pretrained_model_path = "/data0/jliu/Models/LLM/bert-base-uncased"
+        elif "406" in hostname:
+            pretrained_model_path = "/data0/jliu/Models/bert-base-uncased"
+    elif args.model_type == "Roberta":
+        if "407" in hostname:
+            pretrained_model_path = "/data0/jliu/Models/LLM/roberta-base"
+        elif "406" in hostname:
+            pretrained_model_path = "/data0/jliu/Models/roberta-base"
 
+    common_config.pretrained_model_path = pretrained_model_path
     ###################################### init model ###############################################
     # from mymodels import SST
     # global_model = SST(pretrained_model_path)

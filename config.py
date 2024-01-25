@@ -60,6 +60,8 @@ class CommonConfig:
 
         self.test_target_matrix = None
 
+        self.pretrained_model_path = None
+
 class ClientConfig:
     def __init__(self,
                 common_config,
