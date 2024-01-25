@@ -700,6 +700,109 @@ def main():
                         worker.config.local_training_time = 1.46
                     elif worker.config.memory == 8:
                         worker.config.local_training_time = 0.95
+
+            elif "roberta-base" in pretrained_model_path and common_config.dataset_type == "sst2":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.94
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.21
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.76
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.37
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.77
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.53
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.35
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 0.78
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.52
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.94
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.21
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.76
+
+            elif "roberta-base" in pretrained_model_path and common_config.dataset_type == "ag_news":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 3.13
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.59
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 1.1
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.06
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.16
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.76
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.02
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.17
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.79
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 3.13
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.59
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 1.1
+            
+            elif "roberta-base" in pretrained_model_path and common_config.dataset_type == "20news":
+                if common_config.finetune_type == "fedft":
+                    pass
+                elif common_config.finetune_type == "fedlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.71
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.48
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.94
+                elif common_config.finetune_type == "fedadapter":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.82
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.02
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.7
+                elif common_config.finetune_type == "our":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 1.83
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.02
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.7
+                elif common_config.finetune_type == "our_avg":
+                    raise NotImplementedError
+                elif common_config.finetune_type == "heterlora":
+                    if worker.config.memory == 4:
+                        worker.config.local_training_time = 2.71
+                    elif worker.config.memory == 6:
+                        worker.config.local_training_time = 1.48
+                    elif worker.config.memory == 8:
+                        worker.config.local_training_time = 0.94
+
             else:
                 raise NotImplementedError
             # logger.info(f"$$$$$$$$$$$ worker {worker_idx} --> {worker.config.train_data_idxes}")
