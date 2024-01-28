@@ -26,6 +26,7 @@ def get_metrics(task:str):
     "rte": ["accuracy", None],
     "wnli": ["accuracy", None],
     "ag_news": ["accuracy", None],
+    "20news": ["accuracy", None],
     }
     from evaluate import load
     from datasets import load_metric

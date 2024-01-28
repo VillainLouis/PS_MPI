@@ -167,6 +167,8 @@ def main():
         from mymodels import CustomBERTModel
         if common_config.dataset_type == "ag_news":
             num_labels = 4
+        elif common_config.dataset_type == "20news":
+            num_labels = 20
         else:
             num_labels = 3 if common_config.dataset_type.startswith("mnli") else 1 if common_config.dataset_type=="stsb" else 2
         model = CustomBERTModel(pretrained_model_path, num_labels=num_labels, task=common_config.dataset_type)
@@ -346,26 +348,26 @@ async def ada_lora_fl(comm, common_config: CommonConfig, model, optimizer, train
             logger.info(f"train {metric_1_name} -->  {mean(metric_1_all)}")
             
         # evaluation
-        test_iterator = iter(test_loader)
-        trange = range(len(test_loader))
-        model.eval()
-        loss_all=[]
-        metric_name = model.metric.name
-        metric_1_name = None if model.metric_1 is None else model.metric_1.name
-        metric_all=[]
-        metric_1_all = []
-        for step in trange:
-            inputs = prepare_inputs(next(test_iterator), device)
-            step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
-            loss_all.append(step_loss.item())
-            metric_all.append(step_metric[model.metric.name])
-            if model.metric_1 is not None: 
-                metric_1_all.append(step_metric_1[model.metric_1.name])
+        # test_iterator = iter(test_loader)
+        # trange = range(len(test_loader))
+        # model.eval()
+        # loss_all=[]
+        # metric_name = model.metric.name
+        # metric_1_name = None if model.metric_1 is None else model.metric_1.name
+        # metric_all=[]
+        # metric_1_all = []
+        # for step in trange:
+        #     inputs = prepare_inputs(next(test_iterator), device)
+        #     step_loss, step_metric, step_metric_1 = eval_step(model, inputs)
+        #     loss_all.append(step_loss.item())
+        #     metric_all.append(step_metric[model.metric.name])
+        #     if model.metric_1 is not None: 
+        #         metric_1_all.append(step_metric_1[model.metric_1.name])
                 
-        logger.info(f"test loss --> {mean(loss_all)}")
-        logger.info(f"test {metric_name} --> {mean(metric_all)} ")
-        if model.metric_1 is not None:
-            logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
+        # logger.info(f"test loss --> {mean(loss_all)}")
+        # logger.info(f"test {metric_name} --> {mean(metric_all)} ")
+        # if model.metric_1 is not None:
+        #     logger.info(f"test {metric_1_name} -->  {mean(metric_1_all)}")
         
         ######################### Maintainer: updating ###############################
         logger.info("Sending local parameters to the server")
