@@ -238,7 +238,7 @@ def main():
         test_dataset = client_config.test_dataset
 
         logger.info(f"len(client_config.train_data_idxes) = {len(client_config.train_data_idxes)}")
-        tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
+        tokenizer = AutoTokenizer.from_pretrained(pretrained_model_path, use_fast=True)
         data_collator = DataCollatorWithPadding(tokenizer)
         logger.info(f"client_config.train_data_idxes --> {client_config.train_data_idxes}")
         train_loader = mydatasets.create_dataloaders(train_dataset, batch_size=common_config.batch_size, selected_idxs=client_config.train_data_idxes, collate_fn=data_collator)

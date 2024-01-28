@@ -226,9 +226,9 @@ def main():
         
         from torch.utils.data import Subset
         train_dataset = Subset(train_dataset, range(int(partitial_data * len(train_dataset))))
-        from transformers import BertTokenizerFast
+        from transformers import AutoTokenizer
         from transformers.data.data_collator import DataCollatorWithPadding
-        tokenizer = BertTokenizerFast.from_pretrained(pretrained_model_path, use_fast=True)
+        tokenizer = AutoTokenizer.from_pretrained(pretrained_model_path, use_fast=True)
         data_collator = DataCollatorWithPadding(tokenizer)
     test_loader = mydatasets.create_dataloaders(test_dataset, batch_size=common_config.batch_size, shuffle=False, collate_fn=data_collator)
 
